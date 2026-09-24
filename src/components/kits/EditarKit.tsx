@@ -20,14 +20,16 @@ import { beep } from '@/lib/beep'
 import { combinaBusca } from '@/lib/busca'
 import { acharItemPorCodigo } from '@/lib/estoqueCodigo'
 import { dicaDoPaciente } from '@/lib/pacienteDoKit'
+import { hojeLocal } from '@/lib/diaLocal'
 import type { StockItem } from '@/services/estoqueCompras'
-import { buscarPacientesDoKit } from '@/services/pacienteDoKit'
+import { agendaDoDiaParaKit, buscarPacientesDoKit, cirurgiasParaKit } from '@/services/pacienteDoKit'
 import {
   type StockKit,
   adicionarItemKit,
   alterarLinhaKit,
   alterarVoltouLinhaKit,
   atualizarKit,
+  custoUnitarioNoKit,
   excluirKit,
   imprimirContaDoKit,
   imprimirFolhaDoKit,
@@ -89,11 +91,13 @@ export function EditarKit({
     leadId: kit.leadId ?? '',
     leadName: kit.patientName ?? '',
     paciente: kit.patientName ?? '',
+    prontuario: kit.shospProntuario ?? '',
     procedimento: kit.procedureLabel ?? '',
     data: kit.scheduledFor ?? '',
   }))
   const dadosMudaram =
     (dados.leadId || null) !== kit.leadId ||
+    (dados.prontuario || null) !== (kit.shospProntuario ?? null) ||
     (dados.paciente.trim() || null) !== (kit.patientName ?? null) ||
     (dados.procedimento.trim() || null) !== (kit.procedureLabel ?? null) ||
     (dados.data || null) !== (kit.scheduledFor ?? null)
@@ -185,9 +189,41 @@ export function EditarKit({
     incluir(item)
   }
 
+  // Custo pela baixa deste kit (o mesmo da conta impressa); item ainda sem baixa, pelo último preço.
+  const [custoNoKit, setCustoNoKit] = useState<Map<string, number>>(new Map())
+  useEffect(() => {
+    let vivo = true
+    custoUnitarioNoKit(kit.id)
+      .then((m) => vivo && setCustoNoKit(m))
+      .catch(() => undefined)
+    return () => {
+      vivo = false
+    }
+  }, [kit])
+  const custoDe = (itemId: string) => custoNoKit.get(itemId) ?? lastCosts.get(itemId) ?? 0
+  // Diminuir o "Saiu" tira primeiro do que já voltou (stock_kit_alterar_linha): a tela acompanha.
+  const saiuNaTela = (l: StockKit['items'][number]) => local[`saiu:${l.id}`] ?? l.qty
+  const voltouNaTela = (l: StockKit['items'][number]) =>
+    local[`voltou:${l.id}`] ?? Math.max(0, l.returnedQty - Math.max(0, l.qty - saiuNaTela(l)))
+
+  // Agenda sugerida na busca de paciente: cirurgia pela agenda cirúrgica, SPA pelo Shosp.
+  const [agenda, setAgenda] = useState<Awaited<ReturnType<typeof agendaDoDiaParaKit>>>([])
+  useEffect(() => {
+    let vivo = true
+    ;(kit.setor === 'cirurgia' ? cirurgiasParaKit(hojeLocal()) : agendaDoDiaParaKit(hojeLocal(), kit.setor))
+      .then((lista) => vivo && setAgenda(lista))
+      .catch(() => vivo && setAgenda([]))
+    return () => {
+      vivo = false
+    }
+  }, [kit.setor])
+  const sugestoes = useMemo(
+    () => agenda.map((p) => ({ id: p.chave, label: p.nome, hint: dicaDoPaciente(p), leadId: p.leadId, prontuario: p.prontuario })),
+    [agenda],
+  )
+
   const custo = kit.items.reduce(
-    (s, l) =>
-      s + Math.round(Math.max(0, (local[`saiu:${l.id}`] ?? l.qty) - (local[`voltou:${l.id}`] ?? l.returnedQty)) * (lastCosts.get(l.itemId) ?? 0)),
+    (s, l) => s + Math.round(Math.max(0, saiuNaTela(l) - voltouNaTela(l)) * custoDe(l.itemId)),
     0,
   )
   const cobrado = kit.items.reduce((s, l) => s + Math.max(0, l.chargeCents), 0)
@@ -215,16 +251,31 @@ export function EditarKit({
             placeholder="Vincular paciente do CRM ou do Shosp"
             searchPlaceholder="Nome ou telefone…"
             disabled={!editavel}
-            value={dados.leadId ? { id: `lead:${dados.leadId}`, label: dados.leadName || 'Paciente' } : null}
+            value={
+              dados.leadId
+                ? { id: `lead:${dados.leadId}`, label: dados.leadName || 'Paciente' }
+                : dados.prontuario && dados.paciente
+                  ? { id: `shosp:${dados.prontuario}`, label: dados.paciente }
+                  : null
+            }
+            sugestoes={sugestoes}
+            tituloSugestoes={kit.setor === 'cirurgia' ? 'Cirurgias de hoje e amanhã' : kit.setor === 'spa' ? 'Spa Capilar hoje (Shosp)' : 'Agenda de hoje no Shosp'}
             onSearch={async (q) =>
-              (await buscarPacientesDoKit(tenantId, q)).map((p) => ({ id: p.chave, label: p.nome, hint: dicaDoPaciente(p), leadId: p.leadId }))
+              (await buscarPacientesDoKit(tenantId, q)).map((p) => ({
+                id: p.chave,
+                label: p.nome,
+                hint: dicaDoPaciente(p),
+                leadId: p.leadId,
+                prontuario: p.prontuario,
+              }))
             }
             onPick={(p) => {
-              // Paciente só do Shosp não tem lead: fica o nome.
-              const leadId = (p as { leadId?: string | null }).leadId ?? ''
-              setDados((d) => ({ ...d, leadId, leadName: leadId ? p.label : '', paciente: p.label }))
+              // Paciente só do Shosp não tem lead: fica o nome e o prontuário (a conferência do SPA casa por ele).
+              const escolhido = p as { leadId?: string | null; prontuario?: string | null }
+              const leadId = escolhido.leadId ?? ''
+              setDados((d) => ({ ...d, leadId, leadName: leadId ? p.label : '', paciente: p.label, prontuario: escolhido.prontuario ?? '' }))
             }}
-            onClear={() => setDados((d) => ({ ...d, leadId: '', leadName: '' }))}
+            onClear={() => setDados((d) => ({ ...d, leadId: '', leadName: '', prontuario: '' }))}
           />
           <Input
             value={dados.paciente}
@@ -256,6 +307,7 @@ export function EditarKit({
             className="h-9"
           />
         </div>
+        {kit.setor !== 'spa' ? (
         <div className="space-y-1.5 sm:col-span-2">
           <Label>Venda da cirurgia</Label>
           <VendaDoKitPicker
@@ -271,6 +323,7 @@ export function EditarKit({
             }
           />
         </div>
+        ) : null}
         {dadosMudaram ? (
           <div className="sm:col-span-2">
             <Button
@@ -280,6 +333,9 @@ export function EditarKit({
                   atualizarKit({
                     id: kit.id,
                     leadId: dados.leadId || null,
+                    // Paciente trocado: a venda era do paciente anterior e sai junto.
+                    ...((dados.leadId || null) !== kit.leadId ? { clinicSaleId: null } : {}),
+                    shospProntuario: dados.leadId ? null : dados.prontuario || null,
                     patientName: dados.paciente || dados.leadName || null,
                     procedureLabel: dados.procedimento || null,
                     scheduledFor: dados.data || null,
@@ -365,8 +421,8 @@ export function EditarKit({
               {g.linhas.map((l) => {
                 const item = porId.get(l.itemId)
                 const nome = l.label || item?.name || 'Item'
-                const saiu = local[`saiu:${l.id}`] ?? l.qty
-                const voltou = local[`voltou:${l.id}`] ?? l.returnedQty
+                const saiu = saiuNaTela(l)
+                const voltou = voltouNaTela(l)
                 const usado = Math.max(0, saiu - voltou)
                 const escolha = itemEhEscolha(item?.name)
                 return (
@@ -381,7 +437,7 @@ export function EditarKit({
                           {l.isExtra ? 'avulso · ' : ''}
                           {l.consumoSetor ? 'consumo do setor · ' : ''}
                           <span className="font-medium text-foreground">usado {formatQtd(usado)}</span>
-                          {' · '}custo {formatBRL(Math.round(usado * (lastCosts.get(l.itemId) ?? 0)))}
+                          {' · '}custo {formatBRL(Math.round(usado * custoDe(l.itemId)))}
                           {escolha ? <span className="text-amber-700 dark:text-amber-300"> · item de escolha, troque</span> : null}
                         </p>
                       </div>
@@ -401,7 +457,7 @@ export function EditarKit({
                       <div className="space-y-1">
                         <span className="block text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Saiu</span>
                         {editavel ? (
-                          <QtyStepper value={saiu} min={Math.max(voltou, 0.01)} label={`saída de ${nome}`} onChange={(n) => mudarQtd(l.id, n)} />
+                          <QtyStepper value={saiu} min={0.01} label={`saída de ${nome}`} onChange={(n) => mudarQtd(l.id, n)} />
                         ) : (
                           <span className="text-sm tabular-nums">{formatQtd(saiu)}</span>
                         )}

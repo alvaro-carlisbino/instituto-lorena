@@ -1,5 +1,16 @@
 [
   {
+    "id": "2026-09-24-kits-custo-edicao-e-agenda",
+    "data": "2026-09-24",
+    "titulo": "Kits: custo certo na folha, edição sem erro e a agenda certa para cada kit",
+    "itens": [
+      "O custo da conta do paciente estava inflado em alguns remédios: notas antigas entraram com a caixa inteira como se fosse uma unidade (fentanil saía a R$ 98,50 a ampola; o certo é R$ 1,97). Fentanil, dexametasona, ondansetrona, metoprolol e cefuroxima foram corrigidos, inclusive nos kits já feitos, e a devolução de sobra não regrava mais o preço do lote.",
+      "A tela do kit e a conta impressa agora mostram o mesmo custo: o da baixa do próprio kit. O kit montado também passa a mostrar o custo real na lista, não só a estimativa.",
+      "No Editar kit, dá para diminuir o Saiu mesmo depois de marcar o que voltou: o que já voltou sai primeiro, sem erro e sem mexer no estoque de novo.",
+      "Kit de cirurgia sugere as cirurgias de hoje e amanhã (agenda do centro cirúrgico) e já liga a venda. Kit do SPA sugere só o Spa Capilar do Shosp e não mostra venda de cirurgia. Trocar o paciente no Editar kit tira a venda do paciente anterior, e paciente só do Shosp fica gravado com o prontuário."
+    ]
+  },
+  {
     "id": "2026-09-23-venda-de-tc-pelo-valor-total",
     "data": "2026-09-23",
     "titulo": "Venda de transplante: digite o valor total que o paciente paga",

@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabaseClient'
 import { type HorarioDaAgenda, type PacienteDoKit, juntarPacientes, sugestoesDaAgenda } from '@/lib/pacienteDoKit'
 import { searchLeadsByName } from '@/services/clinicalNotes'
+import { listarAgendaCirurgica } from '@/services/agendaCirurgica'
 
 // Busca de paciente do kit: CRM (leads) + espelho do Shosp (shosp_patients / shosp_appointments).
 // Só o espelho, sem chamar o Shosp ao vivo: a cota da API já estourou uma vez (429) e o espelho
@@ -85,4 +86,42 @@ export async function horarioDoShosp(codigoAgendamento: string): Promise<Pacient
     null,
   )
   return p ?? null
+}
+
+const horaLocal = (iso: string | null) => {
+  if (!iso) return null
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? null : d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' })
+}
+
+/**
+ * Kit de cirurgia: quem opera hoje e amanhã, pela agenda do centro cirúrgico (venda + sala). A
+ * cirurgia não está na agenda do Shosp, e a sugestão mostrava consultas no lugar de quem ia operar.
+ */
+export async function cirurgiasParaKit(dia: string): Promise<PacienteDoKit[]> {
+  const amanha = new Date(`${dia}T12:00:00`)
+  amanha.setDate(amanha.getDate() + 1)
+  const ate = amanha.toLocaleDateString('sv-SE')
+  const cirurgias = await listarAgendaCirurgica(dia, ate).catch(() => [])
+  const vistos = new Set<string>()
+  return cirurgias
+    .filter((c) => c.paciente.trim())
+    .sort((a, b) => a.dia.localeCompare(b.dia) || (a.horaInicio ?? '').localeCompare(b.horaInicio ?? ''))
+    .filter((c) => {
+      const chave = c.leadId ?? c.paciente.trim().toLowerCase()
+      if (vistos.has(chave)) return false
+      vistos.add(chave)
+      return true
+    })
+    .map((c) => ({
+      chave: c.leadId ? `lead:${c.leadId}` : `cirurgia:${c.key}`,
+      nome: c.paciente.trim(),
+      leadId: c.leadId,
+      prontuario: null,
+      telefone: null,
+      horario: c.dia === dia ? horaLocal(c.horaInicio) ?? 'hoje' : 'amanhã',
+      prestador: [c.procedimento, c.medico].filter(Boolean).join(' · ') || null,
+      data: c.dia,
+      saleId: c.saleId,
+    }))
 }

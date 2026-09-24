@@ -16,6 +16,8 @@ export type PacienteDoKit = {
   data?: string | null
   /** Código do agendamento no Shosp: é o que a conferência do SPA usa para casar kit e atendimento. */
   agendamento?: string | null
+  /** Cirurgia da agenda cirúrgica: a venda já vem ligada ao kit. */
+  saleId?: string | null
 }
 
 export type LeadAchado = { id: string; name: string; phone: string }

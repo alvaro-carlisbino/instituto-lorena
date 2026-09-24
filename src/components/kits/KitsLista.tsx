@@ -135,7 +135,8 @@ export function KitsLista({
             const status = STATUS_KIT[kit.status]
             const temControlado = kit.items.some((l) => porId.get(l.itemId)?.controlled)
             const devolvido = kit.items.reduce((s, l) => s + l.returnedQty, 0)
-            const custoReal = kit.status === 'consumido' ? kitCosts.get(kit.id) : undefined
+            // Custo da baixa (stock_kit_costs cobre montado e usado): o mesmo número da conta impressa.
+            const custoReal = kit.status !== 'cancelado' ? kitCosts.get(kit.id) : undefined
             const estimado = kit.items.reduce((s, l) => s + Math.round((l.qty - l.returnedQty) * (lastCosts.get(l.itemId) ?? 0)), 0)
             const cobrado = kit.items.reduce((s, l) => s + Math.max(0, l.chargeCents), 0)
             const expandido = aberto === kit.id

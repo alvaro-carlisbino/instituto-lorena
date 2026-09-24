@@ -230,6 +230,10 @@ export type StockKit = {
   patientName: string | null
   procedureLabel: string | null
   scheduledFor: string | null
+  /** Prontuário do Shosp de quem não tem cadastro no CRM (conferência do SPA casa por ele). */
+  shospProntuario: string | null
+  /** Do modelo: kit do SPA não tem venda de cirurgia nem agenda cirúrgica. */
+  setor: SetorKit | null
   status: KitStatus
   note: string | null
   createdAt: string
@@ -239,7 +243,15 @@ export type StockKit = {
 }
 
 const COLUNAS_KIT =
-  'id, name, template_id, lead_id, clinic_sale_id, patient_name, procedure_label, scheduled_for, status, note, created_at, consumed_at, cancelled_at'
+  'id, name, template_id, lead_id, clinic_sale_id, patient_name, procedure_label, scheduled_for, shosp_prontuario, status, note, created_at, consumed_at, cancelled_at, kit_templates(setor), stock_warehouses(code)'
+
+/** Setor pelo modelo; kit avulso tirado do setor SPA também é do SPA. */
+function setorDoKit(r: Record<string, unknown>): SetorKit | null {
+  const tpl = r.kit_templates as { setor?: unknown } | null
+  if (tpl?.setor === 'cirurgia' || tpl?.setor === 'spa') return tpl.setor
+  const wh = r.stock_warehouses as { code?: unknown } | null
+  return wh?.code === 'SPA' ? 'spa' : null
+}
 
 /** Junta os kits com as linhas deles. Só as linhas destes kits, paginadas. */
 async function comLinhas(kits: Array<Record<string, unknown>>): Promise<StockKit[]> {
@@ -284,6 +296,8 @@ async function comLinhas(kits: Array<Record<string, unknown>>): Promise<StockKit
     patientName: r.patient_name != null ? String(r.patient_name) : null,
     procedureLabel: r.procedure_label != null ? String(r.procedure_label) : null,
     scheduledFor: r.scheduled_for != null ? String(r.scheduled_for) : null,
+    shospProntuario: r.shosp_prontuario != null ? String(r.shosp_prontuario) : null,
+    setor: setorDoKit(r),
     status: (r.status === 'consumido' || r.status === 'cancelado' ? r.status : 'montado') as KitStatus,
     note: r.note != null ? String(r.note) : null,
     createdAt: String(r.created_at ?? ''),
@@ -623,11 +637,13 @@ export async function atualizarKit(payload: {
   patientName: string | null
   procedureLabel: string | null
   scheduledFor: string | null
+  shospProntuario?: string | null
 }): Promise<void> {
   const { error } = await assertClient()
     .from('stock_kits')
     .update({
       ...(payload.clinicSaleId !== undefined ? { clinic_sale_id: payload.clinicSaleId } : {}),
+      ...(payload.shospProntuario !== undefined ? { shosp_prontuario: payload.shospProntuario } : {}),
       lead_id: payload.leadId,
       patient_name: payload.patientName?.trim() || null,
       procedure_label: payload.procedureLabel?.trim() || null,
@@ -749,6 +765,37 @@ export async function logControlledExit(payload: {
     note: payload.note?.trim() || null,
   })
   if (error) throw new Error(error.message)
+}
+
+/**
+ * Custo por unidade de cada produto NESTE kit, pelo custo da baixa (saídas menos devoluções).
+ * É o mesmo número da conta impressa: antes a tela usava o último preço de compra e a folha o
+ * custo do lote, e um lote lançado a preço de caixa fazia os dois discordarem (fentanil, 24/09).
+ */
+export async function custoUnitarioNoKit(kitId: string): Promise<Map<string, number>> {
+  const movs = await buscarTudo<{ item_id: unknown; qty_delta: unknown; unit_cost_cents: unknown }>(
+    () =>
+      assertClient()
+        .from('stock_movements')
+        .select('item_id, qty_delta, unit_cost_cents')
+        .eq('ref_type', 'stock_kit')
+        .eq('ref_id', kitId)
+        .order('id'),
+    { rotulo: 'stock_movements do kit' },
+  )
+  const soma = new Map<string, { cents: number; qtd: number }>()
+  for (const m of movs) {
+    if (m.unit_cost_cents == null) continue
+    const id = String(m.item_id)
+    const q = -Number(m.qty_delta ?? 0)
+    const atual = soma.get(id) ?? { cents: 0, qtd: 0 }
+    atual.cents += q * Number(m.unit_cost_cents)
+    atual.qtd += q
+    soma.set(id, atual)
+  }
+  const unit = new Map<string, number>()
+  for (const [id, v] of soma) if (v.qtd > 1e-9) unit.set(id, Math.round(v.cents / v.qtd))
+  return unit
 }
 
 /**

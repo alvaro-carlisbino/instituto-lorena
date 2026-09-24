@@ -41,7 +41,7 @@ import {
 } from '@/lib/kitMontagem'
 import { type PacienteDoKit, dicaDoPaciente } from '@/lib/pacienteDoKit'
 import { cn } from '@/lib/utils'
-import { agendaDoDiaParaKit, buscarPacientesDoKit, horarioDoShosp } from '@/services/pacienteDoKit'
+import { agendaDoDiaParaKit, buscarPacientesDoKit, cirurgiasParaKit, horarioDoShosp } from '@/services/pacienteDoKit'
 import type { StockItem } from '@/services/estoqueCompras'
 import { type StockWarehouse, listWarehouseBalances, listWarehouses } from '@/services/estoqueArmazens'
 import { type KitTemplate, createKit, imprimirFolhaDeItens } from '@/services/estoqueKits'
@@ -192,7 +192,8 @@ export function MontarKit({
   const ehSpa = setorDoModelo === 'spa'
   useEffect(() => {
     let vivo = true
-    agendaDoDiaParaKit(hojeLocal(), setorDoModelo)
+    // Kit de cirurgia: agenda do centro cirúrgico (cirurgia não está no Shosp). SPA e sem modelo: Shosp.
+    ;(setorDoModelo === 'cirurgia' ? cirurgiasParaKit(hojeLocal()) : agendaDoDiaParaKit(hojeLocal(), setorDoModelo))
       .then((lista) => vivo && setAgendaDeHoje(lista))
       .catch(() => vivo && setAgendaDeHoje([]))
     return () => {
@@ -212,7 +213,8 @@ export function MontarKit({
       ...prev,
       leadId: leadId ?? '',
       leadName: leadId ? p?.nome || item.label : '',
-      clinicSaleId: null,
+      // Escolhido na agenda cirúrgica: a venda da cirurgia já vem junto.
+      clinicSaleId: p?.saleId ?? null,
       // Sem cadastro no CRM, o kit fica com o nome que está no Shosp.
       paciente: leadId ? '' : p?.nome || item.label,
       prontuario: p?.prontuario ?? null,
@@ -456,7 +458,7 @@ export function MontarKit({
                   : null
             }
             sugestoes={sugestoesAgenda}
-            tituloSugestoes="Agenda de hoje no Shosp"
+            tituloSugestoes={setorDoModelo === 'cirurgia' ? 'Cirurgias de hoje e amanhã' : setorDoModelo === 'spa' ? 'Spa Capilar hoje (Shosp)' : 'Agenda de hoje no Shosp'}
             onSearch={async (q) => paraPicker(await buscarPacientesDoKit(tenantId, q))}
             onPick={escolherPaciente}
             onClear={() => set({ leadId: '', leadName: '', clinicSaleId: null, prontuario: null, agendamento: null, paciente: '' })}
