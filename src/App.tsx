@@ -106,6 +106,7 @@ const ResultadoCirurgiasPage = lazyPage(() => import('./pages/ResultadoCirurgias
 const CaixaDinheiroPage = lazyPage(() => import('./pages/CaixaDinheiroPage'), 'CaixaDinheiroPage')
 const NfsePage = lazyPage(() => import('./pages/NfsePage'), 'NfsePage')
 const ExtratoPage = lazyPage(() => import('./pages/ExtratoPage'), 'ExtratoPage')
+const ResumoMesPage = lazyPage(() => import('./pages/ResumoMesPage'), 'ResumoMesPage')
 const FinanceiroConfigPage = lazyPage(() => import('./pages/FinanceiroConfigPage'), 'FinanceiroConfigPage')
 const ListasPage = lazyPage(() => import('./pages/ListasPage'), 'ListasPage')
 const DrePage = lazyPage(() => import('./pages/DrePage'), 'DrePage')
@@ -202,6 +203,7 @@ function AppRoutes() {
         <Route path="/caixa-dinheiro" element={<FinanceOnly><CaixaDinheiroPage /></FinanceOnly>} />
         <Route path="/nfse" element={<FinanceOnly><NfsePage /></FinanceOnly>} />
         <Route path="/extrato" element={<FinanceOnly><ExtratoPage /></FinanceOnly>} />
+        <Route path="/resumo-do-mes" element={<FinanceOnly><ResumoMesPage /></FinanceOnly>} />
         <Route path="/financeiro-config" element={<FinanceOnly><FinanceiroConfigPage /></FinanceOnly>} />
         <Route path="/listas" element={<ListasPage />} />
         <Route path="/dre" element={<FinanceOnly><DrePage /></FinanceOnly>} />

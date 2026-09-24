@@ -16,6 +16,12 @@
 //
 // O número que mantém esta tela honesta é "sem centro de custo". Enquanto ele for grande, a
 // divisão da despesa está mentindo por omissão.
+//
+// Esta é a tela do BANCO (24/set/2026, pedido do Kauan): a lista mostra só a conta corrente, e o
+// cartão aparece como aparece no banco, pelo boleto da fatura. O boleto não recebe centro de
+// custo: ele vira "Cartão de crédito" e abre nas compras daquela fatura, cada uma com o seu
+// centro (FaturasCartao). Antes ele caía em "sem centro" e inflava o número que cobra a
+// classificação com um dinheiro que não tinha como ser classificado inteiro.
 
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
@@ -29,9 +35,11 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { ArrowDownLeft, ArrowUpRight, Landmark, Tag, Wand2 } from 'lucide-react'
+import { ArrowDownLeft, ArrowUpRight, ChevronRight, CreditCard, Landmark, Tag, Wand2 } from 'lucide-react'
 
 import { CentroCustoPicker } from '@/components/financeiro/CentroCustoPicker'
+import { FaturasCartao } from '@/components/financeiro/FaturasCartao'
+import { CENTRO_CARTAO, ehPagamentoDeFatura } from '@/lib/faturaCartao'
 import { ExcluirLancamento } from '@/components/financeiro/ExcluirLancamento'
 import { possiveisCopias } from '@/lib/copiasBanco'
 import { centroForaDoTotal } from '@/lib/centroCusto'
@@ -103,6 +111,8 @@ export function ExtratoPage() {
   const [detalhesCentro, setDetalhesCentro] = useState<CostDetail[]>([])
   /** Linha aberta pra edição. Uma por vez: duas abertas viram formulário perdido. */
   const [abertoId, setAbertoId] = useState<string | null>(null)
+  /** Boleto do cartão aberto nas compras da fatura, na lista. */
+  const [faturaAberta, setFaturaAberta] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
   const carregar = async (d = de, a = ate) => {
@@ -144,12 +154,28 @@ export function ExtratoPage() {
   const hojeNoPeriodo = hoje >= de && hoje <= ate
   const diasNoPeriodo = quantosDias(de, ate)
 
+  // Conta corrente: é o recorte da tela inteira. A lista de lançamentos vem com cartão e caixa
+  // junto e sai daqui só com o banco.
+  const idsBanco = useMemo(() => new Set(contas.filter((c) => c.kind === 'banco').map((c) => c.id)), [contas])
+  const cartoes = useMemo(() => contas.filter((c) => c.kind === 'carteira' && c.active), [contas])
+
+  // Boletos da fatura do cartão. Não recebem centro: abrem nas compras.
+  const pagamentosFatura = useMemo(
+    () =>
+      lancamentos
+        .filter((t) => t.direction === 'out' && idsBanco.has(t.accountId) && ehPagamentoDeFatura(t.description))
+        .map((t) => ({ id: t.id, data: t.date, descricao: t.description ?? '', amountCents: Math.abs(t.amountCents) })),
+    [lancamentos, idsBanco],
+  )
+  const faturaCents = pagamentosFatura.reduce((s, p) => s + p.amountCents, 0)
+
   const totais = useMemo(() => {
     const entrou = dias.reduce((s, d) => s + d.entrouCents, 0)
     const saiu = dias.reduce((s, d) => s + d.saiuCents, 0)
-    const classificada = dias.reduce((s, d) => s + d.saidaClassificadaCents, 0)
+    // O boleto do cartão conta como classificado: quem tem centro são as compras dele.
+    const classificada = Math.min(saiu, dias.reduce((s, d) => s + d.saidaClassificadaCents, 0) + faturaCents)
     return { entrou, saiu, saldo: entrou - saiu, classificada, semCategoria: saiu - classificada }
-  }, [dias])
+  }, [dias, faturaCents])
 
   // Dinheiro que só trocou de conta: aplicação e transferência entre contas próprias. O DRE já
   // tira isso do resultado (é a convenção do nome "não é despesa"), mas o extrato somava tudo
@@ -159,10 +185,10 @@ export function ExtratoPage() {
     centroForaDoTotal(centros, t.costCenter) || /não é despesa/i.test(nomeCategoriaPorId.get(t.categoryId ?? '') ?? '')
 
   // Saídas de BANCO, o mesmo recorte dos cards (a lista traz cartão e caixa junto).
-  const saidasBanco = useMemo(() => {
-    const banco = new Set(contas.filter((c) => c.kind === 'banco').map((c) => c.id))
-    return lancamentos.filter((t) => t.direction === 'out' && banco.has(t.accountId))
-  }, [lancamentos, contas])
+  const saidasBanco = useMemo(
+    () => lancamentos.filter((t) => t.direction === 'out' && idsBanco.has(t.accountId)),
+    [lancamentos, idsBanco],
+  )
 
   // Possíveis cópias entre as saídas da mesma conta (lib/copiasBanco).
   const copias = useMemo(() => {
@@ -197,7 +223,7 @@ export function ExtratoPage() {
         nome: t.counterparty || t.description || 'sem descrição',
         descricao: t.description ?? '',
         amountCents: Math.abs(t.amountCents),
-        centro: t.costCenter,
+        centro: ehPagamentoDeFatura(t.description) ? CENTRO_CARTAO : t.costCenter,
         detalhe: t.costDetail,
         foraDoTotal: saidaForaDoTotal(t),
       })),
@@ -208,10 +234,10 @@ export function ExtratoPage() {
   // Os cards vêm da RPC, que só olha conta de BANCO. A lista de lançamentos traz cartão e caixa
   // junto, então todo número tirado dela precisa do mesmo recorte: senão a "maior entrada" pode
   // ser de um cartão e não fechar com o total logo ao lado.
-  const entradasBanco = useMemo(() => {
-    const banco = new Set(contas.filter((c) => c.kind === 'banco').map((c) => c.id))
-    return lancamentos.filter((t) => t.direction === 'in' && banco.has(t.accountId))
-  }, [lancamentos, contas])
+  const entradasBanco = useMemo(
+    () => lancamentos.filter((t) => t.direction === 'in' && idsBanco.has(t.accountId)),
+    [lancamentos, idsBanco],
+  )
 
   // A maior entrada do período, à vista. Um total de R$ 367 mil não conta que R$ 157 mil vieram
   // de UMA transferência; ver o nome do pagador ao lado do total responde "de onde veio isso?"
@@ -243,15 +269,18 @@ export function ExtratoPage() {
     [dias],
   )
 
+  // Só a conta do banco. A compra do cartão mora dentro da fatura, e o caixa em dinheiro tem tela própria.
+  const lancamentosBanco = useMemo(() => lancamentos.filter((t) => idsBanco.has(t.accountId)), [lancamentos, idsBanco])
+
   const visiveis = useMemo(() => {
-    const base = lancamentos.filter((t) => {
+    const base = lancamentosBanco.filter((t) => {
       if (filtro === 'in') return t.direction === 'in'
       if (filtro === 'out') return t.direction === 'out'
-      if (filtro === 'sem_centro') return t.direction === 'out' && !t.costCenter
+      if (filtro === 'sem_centro') return t.direction === 'out' && !t.costCenter && !ehPagamentoDeFatura(t.description)
       return true
     })
     return base.slice(0, 300)
-  }, [lancamentos, filtro])
+  }, [lancamentosBanco, filtro])
 
   const nomeCategoria = (id: string | null) => categorias.find((c) => c.id === id)?.name ?? null
 
@@ -315,7 +344,7 @@ export function ExtratoPage() {
   return (
     <AppLayout
       title="Extrato"
-      subtitle="O que entrou e o que saiu do banco. Toda saída ganha um centro de custo, o mesmo de Gastos."
+      subtitle="O que entrou e o que saiu da conta do banco. Toda saída ganha um centro de custo, o mesmo de Gastos; o boleto do cartão abre nas compras da fatura."
     >
       <FinanceTabs isSalesPolo={tenant.poloType === 'sales'} />
 
@@ -412,6 +441,11 @@ export function ExtratoPage() {
               <div className="text-xs text-muted-foreground">
                 {pctClassificada.toFixed(0)}% da saída classificada. Clique para ver.
               </div>
+              {faturaCents > 0 && (
+                <div className="text-xs text-muted-foreground">
+                  O cartão ({brl(faturaCents)}) se classifica compra a compra, dentro da fatura.
+                </div>
+              )}
             </CardContent>
           </Card>
         </button>
@@ -464,6 +498,16 @@ export function ExtratoPage() {
                 const t = lancamentos.find((x) => x.id === l.refId)
                 if (t) await classificarCentro(t, c, aplicarIguais, padrao)
               }}
+              conteudoDoCentro={(c) =>
+                c === CENTRO_CARTAO ? (
+                  <FaturasCartao
+                    pagamentos={pagamentosFatura}
+                    cartoes={cartoes}
+                    centros={centros}
+                    detalhes={detalhesCentro}
+                  />
+                ) : null
+              }
             />
           </CardContent>
         </Card>
@@ -519,6 +563,8 @@ export function ExtratoPage() {
                 const cat = nomeCategoria(t.categoryId)
                 const saida = t.direction === 'out'
                 const aberto = abertoId === t.id
+                const fatura = saida && ehPagamentoDeFatura(t.description)
+                const faturaAqui = fatura && faturaAberta === t.id
                 const nome = t.description || t.counterparty || 'sem descrição'
                 return (
                   <div key={t.id} className={aberto ? 'bg-muted/20' : ''}>
@@ -546,7 +592,18 @@ export function ExtratoPage() {
                       {saida ? '−' : '+'}
                       {brl(Math.abs(t.amountCents))}
                     </span>
-                    {saida ? (
+                    {fatura ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8 w-[210px] shrink-0 justify-start text-xs"
+                        aria-expanded={faturaAqui}
+                        onClick={() => setFaturaAberta(faturaAqui ? null : t.id)}
+                      >
+                        <CreditCard className="size-3.5" /> {CENTRO_CARTAO}
+                        <ChevronRight className={`ml-auto size-3.5 transition-transform ${faturaAqui ? 'rotate-90' : ''}`} />
+                      </Button>
+                    ) : saida ? (
                       <CentroCustoPicker
                         size="sm"
                         className="h-8 w-[210px] shrink-0"
@@ -594,6 +651,16 @@ export function ExtratoPage() {
                       </Select>
                     )}
                   </div>
+                  {faturaAqui && (
+                    <div className="px-4 pb-3">
+                      <FaturasCartao
+                        pagamentos={[{ id: t.id, data: t.date, descricao: t.description ?? '', amountCents: Math.abs(t.amountCents) }]}
+                        cartoes={cartoes}
+                        centros={centros}
+                        detalhes={detalhesCentro}
+                      />
+                    </div>
+                  )}
                   {aberto && (
                     <div className="px-4 pb-3">
                       <LancamentoEditor
@@ -611,9 +678,9 @@ export function ExtratoPage() {
               })}
               </div>
               {/* Nunca cortar calado. */}
-              {lancamentos.length > visiveis.length && filtro === 'todos' && (
+              {lancamentosBanco.length > visiveis.length && filtro === 'todos' && (
                 <p className="px-4 py-2 text-xs text-muted-foreground">
-                  Mostrando 300 de {lancamentos.length} lançamentos do período. Os totais e o gráfico
+                  Mostrando 300 de {lancamentosBanco.length} lançamentos do período. Os totais e o gráfico
                   acima usam todos.
                 </p>
               )}

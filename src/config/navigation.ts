@@ -12,6 +12,7 @@ import {
   CalendarClock,
   CalendarRange,
   ChartColumn,
+  ChartPie,
   ClipboardCheck,
   ClipboardList,
   ClipboardPen,
@@ -505,6 +506,16 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     icon: Settings2,
     group: 'financeiro',
     keywords: ['centro de custo', 'categoria', 'regra', 'classificacao', 'configurar'],
+    visible: (ctx) => canFinance(ctx) && canBoards(ctx),
+  },
+  {
+    // O mês do banco em gráficos, para apresentar ao Dr. (pedido do Kauan, 24/09/2026).
+    id: 'resumo-do-mes',
+    path: '/resumo-do-mes',
+    label: 'Resumo do mês',
+    icon: ChartPie,
+    group: 'financeiro',
+    keywords: ['gráfico', 'grafico', 'pizza', 'mês', 'semana', 'entrada', 'saída', 'dr', 'apresentação', 'resumo', 'cartão', 'fatura'],
     visible: (ctx) => canFinance(ctx) && canBoards(ctx),
   },
   {

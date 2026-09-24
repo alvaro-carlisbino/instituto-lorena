@@ -59,6 +59,7 @@ export const FINANCE_GROUPS: FinanceGroup[] = [
     id: 'banco',
     label: 'Banco',
     tabs: [
+      { to: '/resumo-do-mes', label: 'Resumo do mês' },
       { to: '/extrato', label: 'Extrato' },
       { to: '/conciliacao', label: 'Conciliação' },
       { to: '/conciliacao-shosp', label: 'Conciliação Shosp', polo: 'clinica' },

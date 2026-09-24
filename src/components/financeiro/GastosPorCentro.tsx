@@ -11,7 +11,7 @@
 // total, e "sem centro" vem primeiro e em âmbar: enquanto for grande, a divisão por centro está
 // falando de uma parte do dinheiro.
 
-import { Fragment, useMemo, useState } from 'react'
+import { Fragment, useMemo, useState, type ReactNode } from 'react'
 import { ChevronRight } from 'lucide-react'
 
 import { CentroCustoPicker } from '@/components/financeiro/CentroCustoPicker'
@@ -59,6 +59,7 @@ export function GastosPorCentro({
   onClassificar,
   onClassificarVarios,
   detalhes = [],
+  conteudoDoCentro,
 }: {
   linhas: LinhaGasto[]
   centros: CostCenter[]
@@ -81,6 +82,11 @@ export function GastosPorCentro({
     aplicarIguais: boolean,
     padrao: string | null,
   ) => Promise<void>
+  /**
+   * O que mostrar ao abrir um centro que não é lista de recebedores. É o caso do cartão no
+   * Extrato: o boleto abre nas compras da fatura, cada uma com o seu centro.
+   */
+  conteudoDoCentro?: (centro: string) => ReactNode | null
 }) {
   const [centroAberto, setCentroAberto] = useState<string | null>(null)
   const [pagadorAberto, setPagadorAberto] = useState<string | null>(null)
@@ -163,6 +169,7 @@ export function GastosPorCentro({
     const todosMarcaveis = b.itens.filter((i) => i.refId).map((i) => i.id)
     const topo = b.pagadores[0]
     const visiveis = todosDe === b.centro ? b.pagadores : b.pagadores.slice(0, PAGADORES_VISIVEIS)
+    const proprio = aberto ? (conteudoDoCentro?.(b.centro) ?? null) : null
     return (
       <div key={b.centro} className={cn('rounded-lg border border-border', aberto && 'bg-muted/20')}>
         <button
@@ -202,7 +209,9 @@ export function GastosPorCentro({
           </div>
         </button>
 
-        {aberto && (
+        {proprio ? (
+          <div className="border-t border-border px-2 pb-2 pt-2">{proprio}</div>
+        ) : aberto && (
           <div className="border-t border-border px-2 pb-2 pt-1">
             {b.descricao ? <p className="px-2 py-1 text-xs text-muted-foreground">{b.descricao}</p> : null}
             {emLote ? (

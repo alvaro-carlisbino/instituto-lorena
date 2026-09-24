@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-09-24-resumo-do-mes-e-cartao-na-fatura",
+    "data": "2026-09-24",
+    "titulo": "Resumo do mês em gráficos e o cartão de crédito aberto em compras",
+    "itens": [
+      "Tela nova em Financeiro, Banco, Resumo do mês: quanto entrou e saiu da conta, dia a dia ou por semana, as semanas do mês lado a lado, pizza de para onde foi e de onde veio o dinheiro, saída por centro de custo e a linha do mês somando dia a dia.",
+      "Dá para ver só as saídas ou só as entradas no botão Mostrar. Clique numa coluna ou numa semana para a tela mostrar só aquele pedaço, e em qualquer fatia, barra ou centro para abrir o detalhe até o pagamento.",
+      "No Extrato, o boleto da fatura virou Cartão de crédito: clique nele para abrir as compras daquela fatura e classificar cada uma com o centro de custo. A lista do Extrato agora mostra só a conta do banco."
+    ]
+  },
+  {
     "id": "2026-09-24-entrada-maior-que-a-anestesia",
     "data": "2026-09-24",
     "titulo": "Venda de transplante: entrada maior que a anestesia não diminui mais o lucro",

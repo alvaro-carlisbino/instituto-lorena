@@ -382,3 +382,35 @@
    Não é foto e não tenta parecer — só tira o traço do branco puro. */
 .viz { --viz-couro: #f6f2ee; }
 .dark .viz { --viz-couro: #222326; }
+
+/* Série categórica do financeiro (Resumo do mês): grupo da saída e forma da entrada.
+   A ordem é a da paleta validada e é ela que dá a cor; a classe nunca troca de cor com o filtro.
+   Validado contra #fffefe e #1d1e21: passa em todos os testes; no claro, aqua, amarelo e magenta
+   ficam abaixo de 3:1 contra o fundo, por isso toda série tem rótulo e tabela ao lado.
+   Aqui o verde fica de fora pelo mesmo motivo do laudo: "Saiu" é vermelho na mesma tela. */
+.viz {
+  --viz-cat-1: #2a78d6;
+  --viz-cat-2: #eb6834;
+  --viz-cat-3: #1baf7a;
+  --viz-cat-4: #eda100;
+  --viz-cat-5: #e87ba4;
+  --viz-cat-6: #4a3aa7;
+  /* Sem centro de custo e grupo sem cor: cinza, que é "ainda não sei" e não uma categoria. */
+  --viz-neutro: #b5b3ad;
+  --viz-neutro-2: #d9d7d0;
+}
+.dark .viz {
+  --viz-cat-1: #3987e5;
+  --viz-cat-2: #d95926;
+  --viz-cat-3: #199e70;
+  --viz-cat-4: #c98500;
+  --viz-cat-5: #d55181;
+  --viz-cat-6: #9085e9;
+  --viz-neutro: #6b6a66;
+  --viz-neutro-2: #4a4945;
+}
+/* Gráfico clicável ganha foco no clique do mouse, e o anel de foco virava uma moldura escura
+   em volta do desenho. O anel continua para quem navega pelo teclado. */
+.viz .recharts-surface:focus:not(:focus-visible) {
+  outline: none;
+}
