@@ -39,6 +39,11 @@ describe('padraoDaRegra', () => {
     expect(padraoDaRegra('MERCADOLIVRE*MERCA04/07')).toBeNull()
     expect(padraoDaRegra('MERCADOLIVRE*CAFEITAL')).toBeNull()
   })
+
+  it('boleto de fatura não vira regra: é igual para o cartão da clínica e para o de fora', () => {
+    expect(padraoDaRegra('BOLETO  PAGO Fatura Carta')).toBeNull()
+    expect(padraoDaRegra('BUSINESS      4004-2658')).toBeNull()
+  })
 })
 
 describe('agruparPorPagador', () => {

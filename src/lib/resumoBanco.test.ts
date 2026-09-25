@@ -74,6 +74,12 @@ describe('grupoDaSaida', () => {
     })
   })
 
+  it('boleto de outro cartão, marcado, conta pelo centro que recebeu', () => {
+    expect(
+      grupoDaSaida({ descricao: 'BOLETO  PAGO Fatura Carta', centro: 'Salários e encargos', categoria: null, faturaSemCompras: true }, CENTROS),
+    ).toEqual({ classe: 'Pessoas', foraDoTotal: false, fatura: false })
+  })
+
   it('centro de custo leva ao grupo; sem centro e grupo desconhecido têm nome próprio', () => {
     expect(grupoDaSaida({ descricao: 'PIX', centro: 'Marketing', categoria: null }, CENTROS).classe).toBe('Comercial')
     expect(grupoDaSaida({ descricao: 'PIX', centro: null, categoria: null }, CENTROS).classe).toBe('Sem centro de custo')

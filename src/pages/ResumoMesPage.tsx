@@ -78,6 +78,7 @@ function paraMovimentos(tx: FinTransaction[], idsBanco: Set<string>, categorias:
       centro: t.costCenter,
       detalhe: t.costDetail,
       categoria: t.categoryId ? (categorias.get(t.categoryId) ?? null) : null,
+      faturaSemCompras: t.faturaSemCompras,
     }))
 }
 

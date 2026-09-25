@@ -262,10 +262,16 @@ export type FinTransaction = {
   reconciledRefType: 'payable' | 'receivable' | null
   reconciledRefId: string | null
   note: string | null
+  /**
+   * Boleto de fatura de um cartão cujas compras NÃO estão no sistema (cartão pessoal pago pela
+   * clínica, outro cartão não ligado). Conta no gasto pelo próprio valor, com o centro que o
+   * financeiro deu. Sem a marca, o boleto fica fora: as compras do cartão é que contam.
+   */
+  faturaSemCompras: boolean
 }
 
 const TXN_COLS =
-  'id, account_id, date, amount_cents, direction, category_id, cost_center, cost_detail, description, counterparty, source, external_id, reconciled_ref_type, reconciled_ref_id, note'
+  'id, account_id, date, amount_cents, direction, category_id, cost_center, cost_detail, description, counterparty, source, external_id, reconciled_ref_type, reconciled_ref_id, note, fatura_sem_compras'
 
 function mapTxn(r: Record<string, unknown>): FinTransaction {
   return {
@@ -287,6 +293,7 @@ function mapTxn(r: Record<string, unknown>): FinTransaction {
         : null,
     reconciledRefId: r.reconciled_ref_id != null ? String(r.reconciled_ref_id) : null,
     note: r.note != null ? String(r.note) : null,
+    faturaSemCompras: r.fatura_sem_compras === true,
   }
 }
 
@@ -1362,6 +1369,26 @@ export async function classificarSaida(
   })
   if (error) throw new Error(error.message)
   return Number(data ?? 0)
+}
+
+/**
+ * Boleto de fatura que não é do cartão ligado ao sistema: passa a contar como saída, com o centro
+ * dado aqui (a RPC recusa marcar sem centro). Desmarcar devolve o boleto ao cartão, sem centro.
+ */
+export async function marcarFaturaSemCompras(
+  transactionId: string,
+  marcar: boolean,
+  centro?: string | null,
+  detalhe?: string | null,
+): Promise<void> {
+  const client = assertClient()
+  const { error } = await client.rpc('crm_fatura_sem_compras', {
+    p_transaction_id: transactionId,
+    p_marcar: marcar,
+    p_centro: centro ?? null,
+    p_detalhe: detalhe ?? null,
+  })
+  if (error) throw new Error(error.message)
 }
 
 /**

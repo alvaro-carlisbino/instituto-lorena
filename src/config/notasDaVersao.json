@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-09-25-boleto-de-outro-cartao",
+    "data": "2026-09-25",
+    "titulo": "Boleto de cartão que não é o da clínica agora entra em Gastos e no DRE",
+    "itens": [
+      "Quando a clínica paga a fatura de outro cartão (o pessoal do Dr., por exemplo), o boleto sumia de Gastos e do DRE, porque o sistema achava que era o cartão da clínica e que as compras já estavam contadas.",
+      "No Extrato, abra Cartão de crédito: cada boleto da fatura tem Não é deste cartão? Diga o que foi. Escolha o centro (Retirada sócios e Dr Fabricio, se foi gasto pessoal) e o boleto sai da fatura e passa a contar sozinho.",
+      "Se marcou errado, a linha do boleto no Extrato tem É do cartão da clínica, que devolve ele para a fatura."
+    ]
+  },
+  {
     "id": "2026-09-24-resumo-do-mes-e-cartao-na-fatura",
     "data": "2026-09-24",
     "titulo": "Resumo do mês em gráficos e o cartão de crédito aberto em compras",

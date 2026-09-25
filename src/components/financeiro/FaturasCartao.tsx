@@ -32,6 +32,7 @@ import { cn } from '@/lib/utils'
 import {
   classificarSaida,
   listTransactions,
+  marcarFaturaSemCompras,
   type CostCenter,
   type CostDetail,
   type FinAccount,
@@ -112,6 +113,20 @@ export function FaturasCartao({
     }
   }
 
+  /**
+   * Boleto que não é deste cartão (cartão pessoal do Dr. pago pela clínica, outro cartão não
+   * ligado): sai da fatura e passa a contar sozinho, pelo centro escolhido aqui.
+   */
+  const boletoDeFora = async (p: PagamentoFatura, c: CostCenter, detalhe: string | null) => {
+    try {
+      await marcarFaturaSemCompras(p.id, true, c.name, detalhe)
+      toast.success(`Boleto de ${diaCurto(p.data)} saiu da fatura e conta como ${detalhe ? `${c.name} · ${detalhe}` : c.name}.`)
+      onMudou?.()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao marcar o boleto')
+    }
+  }
+
   if (cartoes.length === 0) {
     return <p className="px-2 py-3 text-sm text-muted-foreground">Nenhum cartão ligado ao sistema: as compras não têm de onde vir.</p>
   }
@@ -133,6 +148,7 @@ export function FaturasCartao({
           detalhes={detalhes}
           soSemCentro={soSemCentro}
           onClassificar={classificar}
+          onBoletoDeFora={onMudou ? boletoDeFora : undefined}
         />
       ))}
     </div>
@@ -145,12 +161,15 @@ function UmaFatura({
   detalhes,
   soSemCentro,
   onClassificar,
+  onBoletoDeFora,
 }: {
   fatura: Fatura
   centros: CostCenter[]
   detalhes: CostDetail[]
   soSemCentro: boolean
   onClassificar: (i: ItemCartao, c: CostCenter, aplicarIguais: boolean, detalhe: string | null) => Promise<void>
+  /** Sem ele (tela que não recarrega), o boleto não oferece "não é deste cartão". */
+  onBoletoDeFora?: (p: PagamentoFatura, c: CostCenter, detalhe: string | null) => Promise<void>
 }) {
   const porCentro = comprasPorCentro(f.compras)
   const semCentro = porCentro.find((p) => p.centro === null)
@@ -166,8 +185,30 @@ function UmaFatura({
           Fatura que fechou em {diaCurto(f.fechamento)}
         </div>
         <div className="text-xs text-muted-foreground">
-          Compras de {diaCurto(f.de)} a {diaCurto(f.ate)} · paga em{' '}
-          {f.pagamentos.map((p) => `${diaCurto(p.data)} (${brl(p.amountCents)})`).join(' e ')}
+          Compras de {diaCurto(f.de)} a {diaCurto(f.ate)}
+        </div>
+        <div className="mt-1.5 space-y-1">
+          {f.pagamentos.map((p) => (
+            <div key={p.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+              <span>
+                Boleto pago em {diaCurto(p.data)}: <span className="font-medium">{brl(p.amountCents)}</span>
+              </span>
+              {onBoletoDeFora ? (
+                <>
+                  <span className="text-muted-foreground">Não é deste cartão? Diga o que foi:</span>
+                  <CentroCustoPicker
+                    size="sm"
+                    className="h-6 w-[170px]"
+                    centros={centros}
+                    detalhes={detalhes}
+                    value={null}
+                    resumo={{ descricao: `Boleto de outro cartão, pago em ${diaCurto(p.data)}`, data: p.data, amountCents: p.amountCents }}
+                    onPick={(c, { detalhe }) => onBoletoDeFora(p, c, detalhe)}
+                  />
+                </>
+              ) : null}
+            </div>
+          ))}
         </div>
       </div>
       <div className="grid grid-cols-2 gap-x-4 gap-y-2 border-b border-border px-3 py-2.5 sm:grid-cols-4">
@@ -184,7 +225,7 @@ function UmaFatura({
       {!bate && (
         <p className="border-b border-border bg-muted/30 px-3 py-1.5 text-xs text-muted-foreground">
           {f.diferencaCents > 0
-            ? 'Foi pago mais do que as compras que o banco mandou: juros, IOF, anuidade, compra que o banco não mandou, ou outro cartão pago no mesmo boleto.'
+            ? 'Foi pago mais do que as compras que o banco mandou: juros, IOF, anuidade, compra que o banco não mandou, ou um dos boletos é de outro cartão (o pessoal do Dr., por exemplo). Nesse caso, classifique aquele boleto acima: ele sai da fatura e conta sozinho.'
             : 'As compras somam mais do que o boleto: pagamento parcial, estorno que o banco não mandou, ou compra lançada na fatura seguinte.'}{' '}
           Confira no PDF da fatura.
         </p>

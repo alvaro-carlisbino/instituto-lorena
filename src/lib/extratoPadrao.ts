@@ -1,3 +1,5 @@
+import { ehPagamentoDeFatura } from '@/lib/faturaCartao'
+
 /**
  * Assinatura do pagador dentro da descrição do extrato — é o padrão que vira REGRA.
  *
@@ -82,6 +84,9 @@ export function assinaturaPagador(descricao: string): string {
  */
 export function padraoDaRegra(descricao: string): string | null {
   if (/mercado\s*livre/i.test(descricao)) return null
+  // Boleto de fatura tem a mesma cara para todo cartão ("BOLETO PAGO Fatura Carta"): uma regra
+  // com ele classificaria o boleto do cartão da clínica junto com o de outro cartão.
+  if (ehPagamentoDeFatura(descricao)) return null
   const nome = semTrilho(descricao)
   return nome.replace(/[^a-zà-ú]/gi, '').length >= 4 ? nome : null
 }

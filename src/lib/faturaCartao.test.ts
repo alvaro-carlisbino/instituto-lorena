@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import {
   comprasPorCentro,
   diaDeFechamento,
+  ehBoletoDoCartao,
   ehPagamentoDeFatura,
   fechamentoDoPagamento,
   inicioDasCompras,
@@ -35,6 +36,14 @@ describe('ehPagamentoDeFatura', () => {
     expect(ehPagamentoDeFatura('PIX ENVIADO BUSINESS CENTER LTDA')).toBe(false)
     expect(ehPagamentoDeFatura('BOLETO PAGO SULMEDIC COM')).toBe(false)
     expect(ehPagamentoDeFatura(null)).toBe(false)
+  })
+})
+
+describe('ehBoletoDoCartao', () => {
+  it('boleto marcado como de outro cartão sai do cartão e conta sozinho', () => {
+    expect(ehBoletoDoCartao({ description: 'BOLETO  PAGO Fatura Carta' })).toBe(true)
+    expect(ehBoletoDoCartao({ description: 'BOLETO  PAGO Fatura Carta', faturaSemCompras: true })).toBe(false)
+    expect(ehBoletoDoCartao({ description: 'PIX ENVIADO FULANO' })).toBe(false)
   })
 })
 

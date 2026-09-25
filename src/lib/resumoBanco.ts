@@ -41,6 +41,8 @@ export type Movimento = {
   centro: string | null
   detalhe: string | null
   categoria: string | null
+  /** Boleto de fatura de cartão que não está no sistema: conta como saída comum, pelo centro. */
+  faturaSemCompras?: boolean
 }
 
 export type MovimentoClassificado = Movimento & {
@@ -69,10 +71,10 @@ export function formaDaEntrada(descricao: string, categoria: string | null): { c
 
 /** Para onde foi a saída: o grupo do centro de custo, o cartão, ou "sem centro". */
 export function grupoDaSaida(
-  m: Pick<Movimento, 'descricao' | 'centro' | 'categoria'>,
+  m: Pick<Movimento, 'descricao' | 'centro' | 'categoria' | 'faturaSemCompras'>,
   centros: CostCenter[],
 ): { classe: string; foraDoTotal: boolean; fatura: boolean } {
-  if (ehPagamentoDeFatura(m.descricao)) return { classe: CENTRO_CARTAO, foraDoTotal: false, fatura: true }
+  if (ehPagamentoDeFatura(m.descricao) && !m.faturaSemCompras) return { classe: CENTRO_CARTAO, foraDoTotal: false, fatura: true }
   const c = m.centro ? centros.find((x) => x.name === m.centro) : null
   if (c?.grupo === GRUPO_FORA_DO_TOTAL || (m.categoria && /não é despesa/i.test(m.categoria))) {
     return { classe: FORA_DO_TOTAL, foraDoTotal: true, fatura: false }

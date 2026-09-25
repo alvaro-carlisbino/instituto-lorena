@@ -39,7 +39,7 @@ import { ArrowDownLeft, ArrowUpRight, ChevronRight, CreditCard, Landmark, Tag, W
 
 import { CentroCustoPicker } from '@/components/financeiro/CentroCustoPicker'
 import { FaturasCartao } from '@/components/financeiro/FaturasCartao'
-import { CENTRO_CARTAO, ehPagamentoDeFatura } from '@/lib/faturaCartao'
+import { CENTRO_CARTAO, ehBoletoDoCartao } from '@/lib/faturaCartao'
 import { ExcluirLancamento } from '@/components/financeiro/ExcluirLancamento'
 import { possiveisCopias } from '@/lib/copiasBanco'
 import { centroForaDoTotal } from '@/lib/centroCusto'
@@ -67,6 +67,7 @@ import {
   listCostDetails,
   listExtratoPorDia,
   listTransactions,
+  marcarFaturaSemCompras,
   saveCategoryRule,
   updateTransaction,
   type CostCenter,
@@ -163,7 +164,7 @@ export function ExtratoPage() {
   const pagamentosFatura = useMemo(
     () =>
       lancamentos
-        .filter((t) => t.direction === 'out' && idsBanco.has(t.accountId) && ehPagamentoDeFatura(t.description))
+        .filter((t) => t.direction === 'out' && idsBanco.has(t.accountId) && ehBoletoDoCartao(t))
         .map((t) => ({ id: t.id, data: t.date, descricao: t.description ?? '', amountCents: Math.abs(t.amountCents) })),
     [lancamentos, idsBanco],
   )
@@ -223,7 +224,7 @@ export function ExtratoPage() {
         nome: t.counterparty || t.description || 'sem descrição',
         descricao: t.description ?? '',
         amountCents: Math.abs(t.amountCents),
-        centro: ehPagamentoDeFatura(t.description) ? CENTRO_CARTAO : t.costCenter,
+        centro: ehBoletoDoCartao(t) ? CENTRO_CARTAO : t.costCenter,
         detalhe: t.costDetail,
         foraDoTotal: saidaForaDoTotal(t),
       })),
@@ -276,7 +277,7 @@ export function ExtratoPage() {
     const base = lancamentosBanco.filter((t) => {
       if (filtro === 'in') return t.direction === 'in'
       if (filtro === 'out') return t.direction === 'out'
-      if (filtro === 'sem_centro') return t.direction === 'out' && !t.costCenter && !ehPagamentoDeFatura(t.description)
+      if (filtro === 'sem_centro') return t.direction === 'out' && !t.costCenter && !ehBoletoDoCartao(t)
       return true
     })
     return base.slice(0, 300)
@@ -505,6 +506,7 @@ export function ExtratoPage() {
                     cartoes={cartoes}
                     centros={centros}
                     detalhes={detalhesCentro}
+                    onMudou={() => void carregar()}
                   />
                 ) : null
               }
@@ -563,7 +565,7 @@ export function ExtratoPage() {
                 const cat = nomeCategoria(t.categoryId)
                 const saida = t.direction === 'out'
                 const aberto = abertoId === t.id
-                const fatura = saida && ehPagamentoDeFatura(t.description)
+                const fatura = saida && ehBoletoDoCartao(t)
                 const faturaAqui = fatura && faturaAberta === t.id
                 const nome = t.description || t.counterparty || 'sem descrição'
                 return (
@@ -581,6 +583,7 @@ export function ExtratoPage() {
                             confere ia procurar no extrato de uma conta só — quando a linha era de
                             outra, virava "essa saída não existe no banco". */}
                         {nomeDaConta(t.accountId) ? `${nomeDaConta(t.accountId)} · ` : ''}
+                        {t.faturaSemCompras ? 'boleto de outro cartão · ' : ''}
                         {t.costDetail ? `${t.costDetail} · ` : ''}
                         {!saida && cat ? `${cat} · ` : ''}
                         <span className="underline underline-offset-2">{aberto ? 'fechar' : 'detalhes e rateio'}</span>
@@ -651,6 +654,30 @@ export function ExtratoPage() {
                       </Select>
                     )}
                   </div>
+                  {saida && t.faturaSemCompras && (
+                    // Boleto que alguém disse não ser do cartão da clínica: conta sozinho, pelo
+                    // centro dele. O caminho de volta fica à vista, porque a marca foi uma decisão.
+                    <div className="flex flex-wrap items-center gap-2 px-4 pb-2 pl-[6.75rem] text-xs text-muted-foreground">
+                      <CreditCard className="size-3.5" />
+                      Boleto de um cartão que não está no sistema: conta como saída de {t.costCenter ?? 'sem centro'}.
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 px-2 text-xs"
+                        onClick={async () => {
+                          try {
+                            await marcarFaturaSemCompras(t.id, false)
+                            toast.success('Boleto de volta ao cartão da clínica.')
+                          } catch (e) {
+                            toast.error(e instanceof Error ? e.message : 'Falha ao desfazer')
+                          }
+                          await carregar()
+                        }}
+                      >
+                        É do cartão da clínica
+                      </Button>
+                    </div>
+                  )}
                   {faturaAqui && (
                     <div className="px-4 pb-3">
                       <FaturasCartao
@@ -658,6 +685,7 @@ export function ExtratoPage() {
                         cartoes={cartoes}
                         centros={centros}
                         detalhes={detalhesCentro}
+                        onMudou={() => void carregar()}
                       />
                     </div>
                   )}

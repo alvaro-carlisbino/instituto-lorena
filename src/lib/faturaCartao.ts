@@ -26,6 +26,15 @@ export function ehPagamentoDeFatura(descricao: string | null | undefined): boole
   )
 }
 
+/**
+ * Boleto do cartão ligado ao sistema: fica fora do gasto e abre nas compras. O boleto marcado
+ * como de outro cartão (`fatura_sem_compras`, 25/set/2026) não entra aqui: ele conta sozinho, pelo
+ * centro que o financeiro deu, porque as compras dele não estão no sistema.
+ */
+export function ehBoletoDoCartao(t: { description: string | null; faturaSemCompras?: boolean }): boolean {
+  return ehPagamentoDeFatura(t.description) && !t.faturaSemCompras
+}
+
 /** Nome da classificação no Extrato e no Resumo. Não é centro de custo cadastrado: é o boleto. */
 export const CENTRO_CARTAO = 'Cartão de crédito'
 
