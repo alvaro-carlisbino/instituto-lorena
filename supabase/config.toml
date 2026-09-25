@@ -592,6 +592,9 @@ verify_jwt = false
 [functions.crm-gads-lead-upload]
 verify_jwt = false
 
+[functions.crm-gads-clinica-upload]
+verify_jwt = false
+
 # Espelho do centro cirúrgico (MySQL c7lorenaap) nas tabelas srg_*. Roda por pg_cron,
 # que não assina JWT (ver crm_cron_auth_gotcha) — daí verify_jwt=false; a função exige
 # x-cron-secret = CIRURGIA_CRON_SECRET (ou a service_role key no Bearer). Pinado aqui

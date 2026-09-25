@@ -114,9 +114,13 @@ export async function googleAdsAccessToken(): Promise<string | null> {
  */
 export async function uploadGoogleAdsConversion(args: {
   gclid: string; valueReais: number; orderId: string; when?: Date; actionId?: string
+  // Outra conta que não a do env (Tricopill). A da clínica é acessada pela MCC, então vem com login.
+  customerId?: string; loginCustomerId?: string
+  // Só confere permissão e formato no Google, sem registrar nada.
+  validateOnly?: boolean
 }): Promise<{ ok: boolean; error?: string; requestId?: string }> {
-  const customerId = onlyDigits(Deno.env.get('GOOGLE_ADS_CUSTOMER_ID'))
-  const loginCustomerId = onlyDigits(Deno.env.get('GOOGLE_ADS_LOGIN_CUSTOMER_ID'))
+  const customerId = onlyDigits(args.customerId ?? Deno.env.get('GOOGLE_ADS_CUSTOMER_ID'))
+  const loginCustomerId = onlyDigits(args.loginCustomerId ?? Deno.env.get('GOOGLE_ADS_LOGIN_CUSTOMER_ID'))
   // actionId explícito permite subir pra OUTRA ação que não a de compra. Hoje quem usa é o
   // crm-gads-lead-upload, que manda os cliques de WhatsApp pra ação "Lead WhatsApp": as vendas
   // do Google fecham na conversa, então otimizar só por compra no site deixa a conta cega.
@@ -140,6 +144,7 @@ export async function uploadGoogleAdsConversion(args: {
       currency: 'BRL',
       eventSource: 'WEB',
     }],
+    ...(args.validateOnly ? { validateOnly: true } : {}),
   }
   try {
     const res = await fetch('https://datamanager.googleapis.com/v1/events:ingest', {
