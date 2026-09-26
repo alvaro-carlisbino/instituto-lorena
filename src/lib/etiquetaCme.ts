@@ -261,11 +261,11 @@ export const ehRetrato = (config: TamanhoEtiqueta) => config.alturaMm > config.l
 /** Largura em pontos em que a logo entra na etiqueta, para quem vai converter a imagem. */
 export function larguraDaLogo(config: ConfigEtiqueta): number {
   const W = larguraUtil(config)
-  if (ehRetrato(config)) return Math.round(W - 2 * mmParaPontos(4 * escalaRetrato(config)))
+  if (ehRetrato(config)) return Math.round(Math.min(W - 2 * mmParaPontos(4), mmParaPontos(76 * escalaRetrato(config))))
   return Math.round(Math.min(W * 0.62, (config.alturaMm / 50) * mmParaPontos(40)))
 }
 
-const escalaRetrato = (config: ConfigEtiqueta) => Math.min(Math.min(config.larguraMm, LARGURA_MAXIMA_MM) / 100, config.alturaMm / 140)
+const escalaRetrato = (config: ConfigEtiqueta) => Math.min(Math.min(config.larguraMm, LARGURA_MAXIMA_MM) / LARGURA_MAXIMA_MM, config.alturaMm / 150)
 
 function campos(p: PacoteParaEtiqueta): Array<[string, string]> {
   return [
@@ -333,6 +333,14 @@ function corpoPaisagem(p: PacoteParaEtiqueta, config: ConfigEtiqueta, logo: Graf
   return partes
 }
 
+type Bloco = { altura: number; desenhar: (y: number) => string[] }
+
+/**
+ * Etiqueta em pé, desenhada para o rolo de 110 × 150 (104 mm úteis): logo, faixa preta "CME",
+ * material, validade em destaque numa caixa, grade com os outros cinco campos e o QR com o número
+ * no rodapé. A folga que sobrar vai para os vãos entre os blocos, então o desenho ocupa a etiqueta
+ * inteira do topo ao pé, sem espaço morto embaixo do QR.
+ */
 function corpoRetrato(p: PacoteParaEtiqueta, config: ConfigEtiqueta, logo: GraficoZpl | null): string[] {
   const W = larguraUtil(config)
   const H = mmParaPontos(config.alturaMm)
@@ -341,54 +349,118 @@ function corpoRetrato(p: PacoteParaEtiqueta, config: ConfigEtiqueta, logo: Grafi
   const fo = posicionador(config)
   const pad = d(4)
   const largura = W - 2 * pad
-  const partes: string[] = []
-  const linha = (y: number) => partes.push(`${fo(pad, y)}^GB${largura},${Math.max(2, d(0.4))},${Math.max(2, d(0.4))}^FS`)
+  const blocos: Bloco[] = []
 
-  let y = pad
   if (logo) {
-    partes.push(`${fo((W - logo.larguraPontos) / 2, y)}${graficoZpl(logo)}`)
-    y += logo.alturaPontos + d(2.5)
-    const hSub = d(3.6)
-    partes.push(`${fo(pad, y)}${fonte(hSub)}^FB${largura},1,0,C,0${textoZpl('CME  ·  MATERIAL ESTERILIZADO')}`)
-    y += hSub + d(2)
+    blocos.push({ altura: logo.alturaPontos, desenhar: (y) => [`${fo((W - logo.larguraPontos) / 2, y)}${graficoZpl(logo)}`] })
   } else {
-    const hCab = d(5)
-    partes.push(`${fo(pad, y)}${fonte(hCab)}^FB${largura},1,0,C,0${textoZpl(CABECALHO)}`)
-    y += hCab + d(2)
+    const h = d(6)
+    blocos.push({ altura: h, desenhar: (y) => [`${fo(pad, y)}${fonte(h)}^FB${largura},1,0,C,0${textoZpl(CABECALHO)}`] })
   }
-  linha(y)
-  y += d(2.5)
 
-  const hNome = d(8)
-  for (const l of quebrarLinhas(p.materialNome, hNome, largura, 2)) {
-    partes.push(`${fo(pad, y)}${fonte(hNome)}${textoZpl(l)}`)
-    y += hNome + d(1)
-  }
-  y += d(1)
-  linha(y)
-  y += d(3)
-
-  // Seis campos em duas colunas: rótulo pequeno em cima, valor grande embaixo.
-  const hRotulo = d(3.6)
-  const hValor = d(5.6)
-  const vao = d(4)
-  const coluna = Math.round((largura - vao) / 2)
-  const lista = campos(p)
-  const porColuna = Math.ceil(lista.length / 2)
-  const passo = hRotulo + d(0.8) + hValor + d(5)
-  lista.forEach(([rotulo, valor], i) => {
-    const x = pad + (i < porColuna ? 0 : coluna + vao)
-    const yc = y + (i % porColuna) * passo
-    partes.push(`${fo(x, yc)}${fonte(hRotulo)}${textoZpl(rotulo)}`)
-    partes.push(`${fo(x, yc + hRotulo + d(0.8))}${fonte(hValor)}${textoZpl(caberNaLargura(valor, hValor, coluna))}`)
+  // Faixa preta com o texto vazado.
+  const hFaixa = d(8)
+  const hFaixaTexto = d(4.4)
+  blocos.push({
+    altura: hFaixa,
+    desenhar: (y) => [
+      `${fo(pad, y)}^GB${largura},${hFaixa},${hFaixa}^FS`,
+      `${fo(pad, y + Math.round((hFaixa - hFaixaTexto) / 2) + d(0.3))}${fonte(hFaixaTexto)}^FB${largura},1,0,C,0^FR${textoZpl('CME  ·  MATERIAL ESTERILIZADO')}`,
+    ],
   })
-  y += porColuna * passo
-  linha(y)
-  y += d(3)
 
-  const area = H - pad - y
-  const larguraCodigo = config.codigo === 'qr' ? Math.min(largura, d(45)) : Math.round(largura * 0.85)
-  partes.push(...blocoDoCodigo(p.codigo, config, fo, pad + (largura - larguraCodigo) / 2, y, larguraCodigo, area, d(4), d(1.2), d(26)))
+  const hRotulo = d(3)
+  const hNome = d(7.5)
+  const passoNome = d(8.4)
+  const linhasNome = quebrarLinhas(p.materialNome, hNome, largura, 2)
+  blocos.push({
+    altura: hRotulo + d(1) + (linhasNome.length - 1) * passoNome + hNome,
+    desenhar: (y) => [
+      `${fo(pad, y)}${fonte(hRotulo)}${textoZpl('MATERIAL')}`,
+      ...linhasNome.map((l, i) => `${fo(pad, y + hRotulo + d(1) + i * passoNome)}${fonte(hNome)}${textoZpl(l)}`),
+    ],
+  })
+
+  // Validade: o que a equipe confere antes de abrir o pacote, em caixa e com a data grande.
+  const hValidade = d(17)
+  const hData = d(11)
+  const hRotuloValidade = d(4.6)
+  blocos.push({
+    altura: hValidade,
+    desenhar: (y) => [
+      `${fo(pad, y)}^GB${largura},${hValidade},${Math.max(3, d(0.5))}^FS`,
+      `${fo(pad + d(3), y + Math.round((hValidade - hRotuloValidade) / 2))}${fonte(hRotuloValidade)}${textoZpl('VALIDADE')}`,
+      `${fo(pad + d(3), y + Math.round((hValidade - hData) / 2) + d(0.6))}${fonte(hData)}^FB${largura - 2 * d(3)},1,0,R,0${textoZpl(dataBr(p.validade))}`,
+    ],
+  })
+
+  // Grade: duas colunas nas duas primeiras linhas, responsável na linha inteira.
+  const hLinha = d(14)
+  const hCampoRotulo = d(3)
+  const hCampoValor = d(5.8)
+  const meia = Math.round(largura / 2)
+  const celula = (x: number, y: number, larguraCelula: number, rotulo: string, valor: string) => [
+    `${fo(x + d(2.5), y + d(2))}${fonte(hCampoRotulo)}${textoZpl(rotulo)}`,
+    `${fo(x + d(2.5), y + d(2) + hCampoRotulo + d(1.2))}${fonte(hCampoValor)}${textoZpl(caberNaLargura(valor, hCampoValor, larguraCelula - 2 * d(2.5)))}`,
+  ]
+  const linhaFina = Math.max(2, d(0.3))
+  blocos.push({
+    altura: 3 * hLinha,
+    desenhar: (y) => [
+      `${fo(pad, y)}^GB${largura},${3 * hLinha},${Math.max(3, d(0.4))}^FS`,
+      `${fo(pad, y + hLinha)}^GB${largura},${linhaFina},${linhaFina}^FS`,
+      `${fo(pad, y + 2 * hLinha)}^GB${largura},${linhaFina},${linhaFina}^FS`,
+      `${fo(pad + meia, y)}^GB${linhaFina},${2 * hLinha},${linhaFina}^FS`,
+      ...celula(pad, y, meia, 'ESTERILIZAÇÃO', `${dataBr(p.esterilizadoEm)} ${horaBr(p.esterilizadoEm)}`.trim()),
+      ...celula(pad + meia, y, largura - meia, 'MÉTODO', maiusculo(metodoCurto(p.metodo))),
+      ...celula(pad, y + hLinha, meia, 'LOTE', p.lote),
+      ...celula(pad + meia, y + hLinha, largura - meia, 'EQUIPAMENTO', p.autoclave),
+      ...celula(pad, y + 2 * hLinha, largura, 'RESPONSÁVEL PELO PREPARO', maiusculo(p.responsavel)),
+    ],
+  })
+
+  if (config.codigo === 'qr') {
+    // QR à esquerda, número do pacote à direita.
+    const n = qrDoPacote(p.codigo)
+    const mag = Math.max(1, Math.min(10, Math.floor(d(30) / n)))
+    const lado = mag * n
+    const xTexto = pad + lado + d(5)
+    const hNumero = d(6)
+    const grupo = hRotulo + d(1.5) + hNumero + d(2.5) + hRotulo
+    blocos.push({
+      altura: lado,
+      desenhar: (y) => {
+        const yt = y + Math.round((lado - grupo) / 2)
+        return [
+          `${fo(pad, Math.max(0, y - DESLOCAMENTO_QR))}^BQN,2,${mag}^FDMA,${p.codigo}^FS`,
+          `${fo(xTexto, yt)}${fonte(hRotulo)}${textoZpl('PACOTE')}`,
+          `${fo(xTexto, yt + hRotulo + d(1.5))}${fonte(hNumero)}${textoZpl(p.codigo)}`,
+          `${fo(xTexto, yt + hRotulo + d(1.5) + hNumero + d(2.5))}${fonte(hRotulo)}${textoZpl('Bipe na montagem do kit')}`,
+        ]
+      },
+    })
+  } else {
+    const hBloco = d(30)
+    const larguraCodigo = Math.round(largura * 0.9)
+    blocos.push({
+      altura: hBloco,
+      desenhar: (y) => blocoDoCodigo(p.codigo, config, fo, pad + (largura - larguraCodigo) / 2, y, larguraCodigo, hBloco, d(4.5), d(1.2), d(22)),
+    })
+  }
+
+  // Margens e vãos mínimos; o que sobrar da altura vai igual para cada vão.
+  const margem = d(3.5)
+  const vaoMinimo = d(2.5)
+  const vaos = blocos.length - 1
+  const ocupado = blocos.reduce((t, b) => t + b.altura, 0)
+  const folga = H - 2 * margem - ocupado - vaos * vaoMinimo
+  const vao = vaoMinimo + (vaos > 0 ? Math.max(-vaoMinimo / 2, folga / vaos) : 0)
+  const partes: string[] = []
+  let y = margem
+  for (const b of blocos) {
+    partes.push(...b.desenhar(Math.round(y)))
+    y += b.altura + vao
+  }
   return partes
 }
 

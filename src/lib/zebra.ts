@@ -30,55 +30,103 @@ export class ErroZebra extends Error {
 export const PONTOS_POR_MM = 8
 export const LARGURA_MAXIMA_MM = 104
 
-// http primeiro: Chrome e Edge aceitam http://127.0.0.1 numa página https e assim ninguém precisa
-// aceitar o certificado do Browser Print. O Safari bloqueia e cai no https.
+// Como o BrowserPrint.js 3.0.216 da Zebra: http://127.0.0.1:9100 (o Chrome aceita http no
+// 127.0.0.1 numa página https, e ninguém precisa aceitar certificado); o Safari bloqueia e cai no
+// https 9101.
 const ENDERECOS = ['http://127.0.0.1:9100', 'https://127.0.0.1:9101']
 let enderecoQueRespondeu: string | null = null
+
+/** Cada conversa com o Browser Print, para a tela de testes mostrar o que aconteceu. */
+export type PassoZebra = { hora: string; metodo: string; url: string; resultado: string; ok: boolean }
+const passos: PassoZebra[] = []
+const anotar = (metodo: string, url: string, ok: boolean, resultado: string) => {
+  passos.unshift({ hora: new Date().toLocaleTimeString('pt-BR'), metodo, url, ok, resultado: resultado.slice(0, 300) })
+  passos.length = Math.min(passos.length, 30)
+}
+export const passosZebra = (): PassoZebra[] => [...passos]
 
 // Prazo longo de propósito: na primeira chamada o Chrome pergunta se o site pode falar com apps
 // deste computador, e o Browser Print pergunta se aceita o site. Sem Browser Print a conexão é
 // recusada na hora, então o prazo só pesa quando alguém está respondendo a pergunta.
 async function pedir(caminho: string, init: RequestInit = {}, prazoMs = 20_000): Promise<string> {
   const ordem = enderecoQueRespondeu ? [enderecoQueRespondeu, ...ENDERECOS.filter((e) => e !== enderecoQueRespondeu)] : ENDERECOS
+  const metodo = init.method ?? 'GET'
+  let ultimaFalha = ''
   for (const base of ordem) {
     const ctrl = new AbortController()
     const timer = window.setTimeout(() => ctrl.abort(), prazoMs)
+    const url = `${base}${caminho}`
     try {
-      const r = await fetch(`${base}${caminho}`, { ...init, signal: ctrl.signal })
+      const r = await fetch(url, { ...init, signal: ctrl.signal })
       const texto = await r.text()
       enderecoQueRespondeu = base
+      anotar(metodo, url, r.ok, `${r.status} ${texto.trim() || '(vazio)'}`)
       if (!r.ok) throw new ErroZebra(texto.trim() || `O Browser Print respondeu ${r.status}.`, 'impressora')
       return texto
     } catch (e) {
       if (e instanceof ErroZebra) throw e
+      ultimaFalha = ctrl.signal.aborted ? `sem resposta em ${prazoMs / 1000}s` : e instanceof Error ? e.message : String(e)
+      anotar(metodo, url, false, ultimaFalha)
     } finally {
       window.clearTimeout(timer)
     }
   }
-  throw new ErroZebra('O Browser Print da Zebra não respondeu neste computador.', 'sem_browser_print')
+  throw new ErroZebra(`O Browser Print da Zebra não respondeu neste computador (${ultimaFalha}).`, 'sem_browser_print')
+}
+
+/**
+ * O device do jeito que o BrowserPrint.js manda de volta: só estes sete campos e version 2 fixo
+ * (é a versão da API, não a da impressora). Mandar o objeto como veio do /available não é o mesmo.
+ */
+export function deviceParaEnvio(d: ImpressoraZebra) {
+  return {
+    name: d.name,
+    uid: d.uid,
+    connection: d.connection,
+    deviceType: d.deviceType,
+    version: 2,
+    provider: d.provider,
+    manufacturer: d.manufacturer,
+  }
 }
 
 const ehImpressora = (d: unknown): d is ImpressoraZebra =>
   !!d && typeof d === 'object' && typeof (d as ImpressoraZebra).uid === 'string' && typeof (d as ImpressoraZebra).name === 'string'
 
-/** Impressora padrão do Browser Print, ou null se ninguém escolheu uma no aplicativo. */
-export async function impressoraPadrao(): Promise<ImpressoraZebra | null> {
-  const texto = await pedir('/default?type=printer')
-  if (!texto.trim()) return null
+/** O /default costuma vir em JSON; algumas versões mandam linhas "name: ...", e essas também servem. */
+export function lerDevice(texto: string): ImpressoraZebra | null {
+  const t = texto.trim()
+  if (!t) return null
   try {
-    const d: unknown = JSON.parse(texto)
+    const d: unknown = JSON.parse(t)
     return ehImpressora(d) ? d : null
   } catch {
-    return null
+    const campos: Record<string, string> = {}
+    for (const linha of t.split(/\r?\n/)) {
+      const m = linha.match(/^\s*([A-Za-z]+)\s*:\s*(.*?)\s*$/)
+      if (m) campos[m[1]] = m[2]
+    }
+    return campos.uid && campos.name
+      ? { name: campos.name, uid: campos.uid, connection: campos.connection ?? '', deviceType: campos.deviceType ?? 'printer', provider: campos.provider, manufacturer: campos.manufacturer }
+      : null
   }
+}
+
+/** Impressora padrão do Browser Print, ou null se ninguém escolheu uma no aplicativo. */
+export async function impressoraPadrao(): Promise<ImpressoraZebra | null> {
+  return lerDevice(await pedir('/default?type=printer'))
 }
 
 /** Todas as impressoras que o Browser Print enxerga (USB, driver e rede). */
 export async function impressorasDisponiveis(): Promise<ImpressoraZebra[]> {
   const texto = await pedir('/available', {}, 30_000)
   try {
-    const d = JSON.parse(texto) as { printer?: unknown[] }
-    return (d.printer ?? []).filter(ehImpressora)
+    const d = JSON.parse(texto) as Record<string, unknown>
+    return Object.values(d)
+      .filter(Array.isArray)
+      .flat()
+      .filter(ehImpressora)
+      .filter((x) => !x.deviceType || x.deviceType === 'printer')
   } catch {
     return []
   }
@@ -103,9 +151,66 @@ export async function enviarZpl(impressora: ImpressoraZebra, zpl: string): Promi
   await pedir('/write', {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
-    body: JSON.stringify({ device: impressora, data: zpl }),
+    body: JSON.stringify({ device: deviceParaEnvio(impressora), data: zpl }),
   })
 }
+
+async function lerDaImpressora(impressora: ImpressoraZebra): Promise<string> {
+  return pedir('/read', {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+    body: JSON.stringify({ device: deviceParaEnvio(impressora) }),
+  })
+}
+
+export type StatusZebra = { pronta: boolean; problemas: string[]; ribbon: boolean; bruto: string }
+
+/**
+ * ~HS (host status): três blocos entre STX e ETX, separados por vírgula. Bloco 1: papel acabou
+ * (2º campo), pausada (3º). Bloco 2: cabeça aberta (3º), ribbon acabou (4º), modo ribbon (5º),
+ * etiquetas ainda na fila (9º).
+ */
+export function lerStatusHs(bruto: string): StatusZebra | null {
+  const STX = String.fromCharCode(2)
+  const ETX = String.fromCharCode(3)
+  const blocos = bruto
+    .split(STX)
+    .slice(1)
+    .filter((b) => b.includes(ETX))
+    .map((b) => b.slice(0, b.indexOf(ETX)).split(','))
+  if (blocos.length < 2 || blocos[0].length < 3 || blocos[1].length < 5) return null
+  const [b1, b2] = blocos
+  const problemas: string[] = []
+  if (b1[1] === '1') problemas.push('Sem etiqueta (papel acabou ou sensor não achou)')
+  if (b1[2] === '1') problemas.push('Pausada: aperte o botão de pausa da Zebra')
+  if (b2[2] === '1') problemas.push('Tampa ou cabeça aberta')
+  if (b2[3] === '1') problemas.push('Sem ribbon (a Zebra está no modo transferência térmica)')
+  if (b1[11] === '1') problemas.push('Cabeça quente demais')
+  const restantes = Number(b2[8])
+  if (Number.isFinite(restantes) && restantes > 0) problemas.push(`${restantes} etiqueta(s) ainda na fila da Zebra`)
+  return { pronta: problemas.length === 0, problemas, ribbon: b2[4] === '1', bruto }
+}
+
+/** Pergunta o status (só funciona com a Zebra em conexão usb ou rede; pelo driver não há leitura). */
+export async function statusDaImpressora(impressora: ImpressoraZebra): Promise<StatusZebra> {
+  await enviarZpl(impressora, '~HS')
+  let bruto = ''
+  for (let i = 0; i < 6; i += 1) {
+    await new Promise((r) => window.setTimeout(r, 400))
+    bruto += await lerDaImpressora(impressora)
+    const s = lerStatusHs(bruto)
+    if (s) return s
+  }
+  throw new ErroZebra(
+    bruto.trim()
+      ? `A Zebra respondeu algo que não é o status: ${bruto.trim().slice(0, 80)}`
+      : `A Zebra não devolveu o status. Pela conexão "${impressora.connection}" talvez não dê para ler (pelo driver do Windows não dá).`,
+    'impressora',
+  )
+}
+
+/** A menor etiqueta possível: se esta não sair, o problema não é o desenho da etiqueta. */
+export const ZPL_MINIMO = '^XA^FO40,40^A0N,60,60^FDTESTE ZEBRA^FS^FO40,120^A0N,30,30^FDSe saiu, o caminho funciona.^FS^XZ'
 
 /**
  * Texto de campo ZPL. Com ^CI28 a impressora lê UTF-8; com ^FH cada byte fora do ASCII (e os

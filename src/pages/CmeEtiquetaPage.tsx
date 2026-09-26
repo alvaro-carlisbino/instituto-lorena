@@ -1,6 +1,6 @@
 import { type Dispatch, type SetStateAction, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { Check, Copy, Minus, Plus, Printer, RefreshCw, Ruler, ScanLine, Settings2 } from 'lucide-react'
+import { Activity, Check, Copy, Minus, Plus, Printer, RefreshCw, Ruler, ScanLine, Settings2, Type } from 'lucide-react'
 
 import { AppLayout } from '@/layouts/AppLayout'
 import { Button } from '@/components/ui/button'
@@ -19,7 +19,18 @@ import {
 } from '@/lib/etiquetaCme'
 import { enviarParaZebra, imprimirPelaJanela, logoDaEtiqueta } from '@/lib/impressaoCme'
 import { cn } from '@/lib/utils'
-import { ErroZebra, type ImpressoraZebra, LARGURA_MAXIMA_MM, type MotivoErroZebra, acharImpressora } from '@/lib/zebra'
+import {
+  ErroZebra,
+  type ImpressoraZebra,
+  LARGURA_MAXIMA_MM,
+  type MotivoErroZebra,
+  type PassoZebra,
+  ZPL_MINIMO,
+  acharImpressora,
+  deviceParaEnvio,
+  passosZebra,
+  statusDaImpressora,
+} from '@/lib/zebra'
 import { listarAutoclaves, listarColaboradores, listarMateriais } from '@/services/cme'
 
 // /cme/etiqueta: a Zebra da CME. Mostra se o Browser Print achou a impressora, guarda o tamanho do
@@ -122,6 +133,7 @@ export function CmeEtiquetaPage() {
   const [enviando, setEnviando] = useState<string | null>(null)
   const [registros, setRegistros] = useState<Registro[]>([])
   const [ultimoZpl, setUltimoZpl] = useState('')
+  const [passos, setPassos] = useState<PassoZebra[]>([])
 
   const mudar = (parcial: Partial<ConfigEtiqueta>) => setConfig((c) => ({ ...c, ...parcial }))
   useEffect(() => guardarConfigEtiqueta(config), [config])
@@ -131,7 +143,7 @@ export function CmeEtiquetaPage() {
   }, [])
   const procurar = () => {
     setConexao({ estado: 'procurando' })
-    void buscarZebra(setConexao, setConfig)
+    void buscarZebra(setConexao, setConfig).finally(() => setPassos(passosZebra()))
   }
 
   // Etiqueta de teste com o que já está no cadastro: material, autoclave e colaborador de verdade.
@@ -172,7 +184,49 @@ export function CmeEtiquetaPage() {
       toast.error(msg)
     } finally {
       setEnviando(null)
+      setPassos(passosZebra())
     }
+  }
+
+  const verStatus = async () => {
+    const impressora = config.zebra ?? (conexao.estado === 'ok' ? conexao.escolhida : null)
+    if (!impressora) {
+      toast.error('Nenhuma Zebra encontrada ainda. Clique em Procurar de novo.')
+      return
+    }
+    setEnviando('Status')
+    try {
+      const st = await statusDaImpressora(impressora)
+      const modo = st.ribbon ? 'modo ribbon' : 'térmico direto'
+      registrar('Status da impressora', st.pronta, st.pronta ? `pronta para imprimir, ${modo}` : `${st.problemas.join('; ')} (${modo})`)
+      if (st.pronta) toast.success(`Zebra pronta para imprimir (${modo}).`)
+      else toast.error(st.problemas.join('. '))
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Falha ao ler o status'
+      registrar('Status da impressora', false, msg)
+      toast.error(msg)
+    } finally {
+      setEnviando(null)
+      setPassos(passosZebra())
+    }
+  }
+
+  const copiarDiagnostico = () => {
+    const texto = [
+      `Navegador: ${navigator.userAgent}`,
+      `Página: ${window.location.href}`,
+      `Impressora: ${config.zebra ? JSON.stringify(deviceParaEnvio(config.zebra)) : 'nenhuma'}`,
+      `Conexão: ${conexao.estado === 'erro' ? `erro ${conexao.motivo}: ${conexao.mensagem}` : conexao.estado}`,
+      `Config: ${config.larguraMm}x${config.alturaMm} ${config.codigo} ${config.impressao} logo=${config.logo} ajuste=${config.ajusteXMm}/${config.ajusteYMm} esc=${config.escuridao} girar=${config.girar}`,
+      '',
+      ...registros.map((r) => `${r.hora} ${r.ok ? 'ok' : 'FALHOU'} ${r.acao}: ${r.detalhe}`),
+      '',
+      ...passos.map((p) => `${p.hora} ${p.metodo} ${p.url} ${p.ok ? 'ok' : 'FALHOU'} ${p.resultado}`),
+    ].join('\n')
+    void navigator.clipboard.writeText(texto).then(
+      () => toast.success('Diagnóstico copiado. Cole na conversa com o suporte.'),
+      () => toast.error('Não deu para copiar.'),
+    )
   }
 
   const imprimirTeste = () => {
@@ -285,6 +339,12 @@ export function CmeEtiquetaPage() {
             A de teste sai com lote TESTE e o código {CODIGO_DE_TESTE}, que o sistema nunca usa: se for bipada, não acha pacote nenhum.
           </p>
           <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" disabled={!zebra || enviando !== null} onClick={() => void mandar('Teste mínimo', async () => ZPL_MINIMO)}>
+              <Type className="size-4" aria-hidden /> Teste mínimo (só texto)
+            </Button>
+            <Button variant="outline" size="sm" disabled={!zebra || enviando !== null} onClick={() => void verStatus()}>
+              <Activity className="size-4" aria-hidden /> Status da impressora
+            </Button>
             <Button variant="outline" size="sm" disabled={!zebra || enviando !== null} onClick={() => void mandar('Régua de alinhamento', async () => reguaZpl(config))}>
               <Ruler className="size-4" aria-hidden /> Régua de alinhamento
             </Button>
@@ -296,7 +356,8 @@ export function CmeEtiquetaPage() {
             </Button>
           </div>
           <p className="text-xs text-muted-foreground">
-            Régua: moldura na borda da etiqueta e marcas a cada 5 mm, para conferir tamanho e posição. Calibrar: a Zebra puxa algumas etiquetas até achar o espaço entre
+            Teste mínimo: duas linhas de texto, sem logo nem QR; se ele sai e a etiqueta não, o problema é o desenho. Status: a Zebra diz se está pausada, sem
+            etiqueta, com a tampa aberta ou sem ribbon. Régua: moldura na borda da etiqueta e marcas a cada 5 mm, para conferir tamanho e posição. Calibrar: a Zebra puxa algumas etiquetas até achar o espaço entre
             elas (faça depois de trocar o rolo). Configuração: a própria Zebra imprime resolução, sensor e escuridão.
           </p>
           {registros.length > 0 ? (
@@ -427,6 +488,26 @@ export function CmeEtiquetaPage() {
             </p>
           </div>
         </section>
+
+        <details className="rounded-xl border border-border bg-card p-3 text-sm" open={registros.some((r) => !r.ok)}>
+          <summary className="cursor-pointer font-medium">Diagnóstico da conexão</summary>
+          <div className="mt-2 space-y-2">
+            {passos.length === 0 ? (
+              <p className="text-muted-foreground">Nenhuma conversa com o Browser Print ainda.</p>
+            ) : (
+              <ul className="space-y-1 font-mono text-xs">
+                {passos.map((p, i) => (
+                  <li key={`${p.hora}-${i}`} className={cn('break-all', p.ok ? 'text-muted-foreground' : 'text-destructive')}>
+                    {p.hora} {p.metodo} {p.url.replace(/^https?:\/\/127\.0\.0\.1:/, ':')} {p.ok ? 'ok' : 'falhou'} · {p.resultado}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <Button size="sm" variant="outline" onClick={copiarDiagnostico}>
+              <Copy className="size-4" aria-hidden /> Copiar diagnóstico
+            </Button>
+          </div>
+        </details>
 
         {ultimoZpl ? (
           <details className="rounded-xl border border-border bg-card p-3 text-sm">

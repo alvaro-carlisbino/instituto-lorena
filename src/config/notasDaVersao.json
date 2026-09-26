@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-09-26-cme-etiqueta-novo-desenho",
+    "data": "2026-09-26",
+    "titulo": "CME: etiqueta da Zebra com desenho novo, ocupando a etiqueta inteira",
+    "itens": [
+      "Etiqueta de 110 × 150 redesenhada: logo, faixa CME, material, validade grande numa caixa, os outros campos em grade e o QR com o número do pacote no rodapé. Não sobra mais espaço embaixo do QR.",
+      "Em Etiqueta e impressora: Teste mínimo (só texto) para saber se o problema é a conexão ou o desenho, e Status da impressora, que diz se a Zebra está pausada, sem etiqueta, com a tampa aberta ou sem ribbon.",
+      "Diagnóstico da conexão mostra cada conversa com o Browser Print, com botão Copiar diagnóstico para mandar ao suporte."
+    ]
+  },
+  {
     "id": "2026-09-26-cme-zebra-direto",
     "data": "2026-09-26",
     "titulo": "CME: etiqueta sai direto na Zebra, com logo e tela de testes",

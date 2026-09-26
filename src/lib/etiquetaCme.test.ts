@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { CONFIG_PADRAO, caberNaLargura, ehCodigoDePacote, etiquetaZpl, folhaDeEtiquetas, metodoCurto, qrSvg, reguaZpl } from './etiquetaCme'
-import { graficoZpl, pixelsParaGrafico, textoZpl } from './zebra'
+import { deviceParaEnvio, graficoZpl, lerDevice, lerStatusHs, pixelsParaGrafico, textoZpl } from './zebra'
 
 const pacote = {
   codigo: '2900000000018',
@@ -101,5 +101,23 @@ describe('etiqueta da CME', () => {
 
   it('régua com moldura no tamanho útil', () => {
     expect(reguaZpl({ ...CONFIG_PADRAO, larguraMm: 100, alturaMm: 50 })).toContain('^FO0,0^GB800,400,3^FS')
+  })
+
+  it('status ~HS: pausada, sem papel e modo ribbon', () => {
+    const hs = '\x02030,1,1,1245,000,0,0,0,000,0,0,0\x03\r\n\x02001,0,0,0,1,2,6,0,00000000,1,000\x03\r\n\x021234,0\x03'
+    const st = lerStatusHs(hs)!
+    expect(st.pronta).toBe(false)
+    expect(st.ribbon).toBe(true)
+    expect(st.problemas.join(' ')).toMatch(/Sem etiqueta.*Pausada/)
+    expect(lerStatusHs('lixo')).toBeNull()
+  })
+
+  it('device: /default em JSON ou em linhas, e volta com version 2 como no BrowserPrint.js', () => {
+    const json = lerDevice('{"name":"ZD220","uid":"u1","connection":"driver","deviceType":"printer","version":3,"provider":"p","manufacturer":"Zebra","extra":1}')!
+    expect(deviceParaEnvio(json)).toEqual({ name: 'ZD220', uid: 'u1', connection: 'driver', deviceType: 'printer', version: 2, provider: 'p', manufacturer: 'Zebra' })
+    const texto = lerDevice('device:\n\tname: ZD220\n\tdeviceType: printer\n\tconnection: usb\n\tuid: u2\n\tprovider: p\n\tmanufacturer: Zebra')!
+    expect(texto.uid).toBe('u2')
+    expect(texto.connection).toBe('usb')
+    expect(lerDevice('')).toBeNull()
   })
 })
