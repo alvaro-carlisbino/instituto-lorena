@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-09-26-cme-zebra-direto",
+    "data": "2026-09-26",
+    "titulo": "CME: etiqueta sai direto na Zebra, com logo e tela de testes",
+    "itens": [
+      "Nova tela no menu CME: Etiqueta e impressora. Ela mostra se a Zebra está conectada e tem o botão Imprimir etiqueta de teste, com quantidade.",
+      "A etiqueta sai direto na Zebra pelo Browser Print, sem janela de impressão, no rolo grande de 110 × 150 mm, com a logo do Instituto no topo e o QR embaixo.",
+      "Na mesma tela: régua de alinhamento, calibrar o rolo, página de configuração da Zebra, ajuste fino para a direita e para baixo e escuridão. Se a Zebra não responder ao abrir um ciclo, o aviso oferece imprimir pela janela."
+    ]
+  },
+  {
     "id": "2026-09-26-follow-up-e-adicionar-paciente",
     "data": "2026-09-26",
     "titulo": "Follow-up conta só consulta de outro mês, e a aba Cirurgias ganhou Adicionar paciente",

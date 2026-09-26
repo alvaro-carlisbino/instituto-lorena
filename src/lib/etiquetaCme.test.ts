@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import { ehCodigoDePacote, folhaDeEtiquetas, metodoCurto, qrSvg } from './etiquetaCme'
+import { CONFIG_PADRAO, caberNaLargura, ehCodigoDePacote, etiquetaZpl, folhaDeEtiquetas, metodoCurto, qrSvg, reguaZpl } from './etiquetaCme'
+import { graficoZpl, pixelsParaGrafico, textoZpl } from './zebra'
 
 const pacote = {
   codigo: '2900000000018',
@@ -56,5 +57,49 @@ describe('etiqueta da CME', () => {
   it('método curto', () => {
     expect(metodoCurto('Vapor saturado sob pressão')).toBe('Vapor')
     expect(metodoCurto('Plasma de peróxido de hidrogênio')).toBe('Peróxido H2O2')
+  })
+
+  it('ZPL do rolo grande (110 × 150): largura útil da ZD220, UTF-8 e os campos em hexa', () => {
+    const zpl = etiquetaZpl(pacote, CONFIG_PADRAO)
+    expect(zpl).toMatch(/^\^XA\^CI28\^PW832\^LL1200\^LH0,0\^PON\^MD0/)
+    expect(zpl).toContain('ESTERILIZA_C3_87_C3_83O')
+    expect(zpl).toContain('^FDAC2-0457^FS')
+    expect(zpl).toContain('_C3_89DINA')
+    expect(zpl).toMatch(/\^BQN,2,\d+\^FDMA,2900000000018\^FS/)
+    expect(zpl.trim().endsWith('^PQ1^XZ')).toBe(true)
+  })
+
+  it('ZPL deitado com barras, ajuste, escuridão e cópias', () => {
+    const zpl = etiquetaZpl(pacote, { ...CONFIG_PADRAO, larguraMm: 100, alturaMm: 50, codigo: 'barras', ajusteXMm: 1, escuridao: 4, girar: true }, 3)
+    expect(zpl).toContain('^PW800^LL400')
+    expect(zpl).toContain('^POI^MD4')
+    expect(zpl).toContain('^BEN,')
+    expect(zpl).toContain('^FD290000000001^FS')
+    expect(zpl).not.toContain('^BQN')
+    expect(zpl).toContain('^FO32,')
+    expect(zpl).toContain('^PQ3^XZ')
+  })
+
+  it('logo entra como ^GFA no topo', () => {
+    const px = new Uint8ClampedArray(16 * 2 * 4).fill(255)
+    px.set([0, 0, 0, 255], 0)
+    const logo = pixelsParaGrafico(px, 16, 2)
+    expect(logo.hex).toBe('80000000')
+    expect(graficoZpl(logo)).toBe('^GFA,4,4,2,80000000^FS')
+    expect(etiquetaZpl(pacote, CONFIG_PADRAO, 1, logo)).toContain('^GFA,4,4,2,80000000^FS')
+  })
+
+  it('texto longo é cortado com reticências em vez de passar por cima do QR', () => {
+    const t = caberNaLargura('RESPONSÁVEL: MARIA APARECIDA DOS SANTOS OLIVEIRA', 26, 300)
+    expect(t.endsWith('...')).toBe(true)
+    expect(t.length).toBeLessThan(30)
+  })
+
+  it('texto ZPL escapa acento e caracteres de comando', () => {
+    expect(textoZpl('Ç^~_a')).toBe('^FH_^FD_C3_87_5E_7E_5Fa^FS')
+  })
+
+  it('régua com moldura no tamanho útil', () => {
+    expect(reguaZpl({ ...CONFIG_PADRAO, larguraMm: 100, alturaMm: 50 })).toContain('^FO0,0^GB800,400,3^FS')
   })
 })

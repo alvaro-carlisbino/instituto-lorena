@@ -129,6 +129,7 @@ const KitConferenciaSpaPage = lazyPage(() => import('./pages/KitConferenciaSpaPa
 const CmePage = lazyPage(() => import('./pages/CmePage'), 'CmePage')
 const CmePacotesPage = lazyPage(() => import('./pages/CmePage'), 'CmePacotesPage')
 const CmeCadastroPage = lazyPage(() => import('./pages/CmePage'), 'CmeCadastroPage')
+const CmeEtiquetaPage = lazyPage(() => import('./pages/CmeEtiquetaPage'), 'CmeEtiquetaPage')
 const InventarioPage = lazyPage(() => import('./pages/InventarioPage'), 'InventarioPage')
 const EstoqueRelatoriosPage = lazyPage(() => import('./pages/EstoqueRelatoriosPage'), 'EstoqueRelatoriosPage')
 const CodigosBarrasPage = lazyPage(() => import('./pages/CodigosBarrasPage'), 'CodigosBarrasPage')
@@ -224,6 +225,7 @@ function AppRoutes() {
         <Route path="/cme" element={<CmePage />} />
         <Route path="/cme/pacotes" element={<CmePacotesPage />} />
         <Route path="/cme/cadastro" element={<CmeCadastroPage />} />
+        <Route path="/cme/etiqueta" element={<CmeEtiquetaPage />} />
         <Route path="/inventario" element={<InventarioPage />} />
         <Route path="/estoque-relatorios" element={<EstoqueRelatoriosPage />} />
         <Route path="/estoque-codigos" element={<CodigosBarrasPage />} />

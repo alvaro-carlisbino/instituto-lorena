@@ -12,8 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/u
 import { Textarea } from '@/components/ui/textarea'
 import { QtyStepper } from '@/components/estoque/QtyStepper'
 import { ScanBar } from '@/components/estoque/ScanBar'
-import { imprimirHtml } from '@/lib/exportar'
-import { type ConfigEtiqueta, folhaDeEtiquetas, guardarConfigEtiqueta, lerConfigEtiqueta } from '@/lib/etiquetaCme'
+import { imprimirEtiquetasCme } from '@/lib/impressaoCme'
 import { cn } from '@/lib/utils'
 import {
   type Autoclave,
@@ -53,16 +52,9 @@ const STATUS_CICLO: Record<CicloCme['status'], { rotulo: string; classe: string 
   reprovado: { rotulo: 'Reprovado', classe: 'bg-red-500/15 text-red-700 dark:text-red-300' },
 }
 
+/** Direto na Zebra pelo Browser Print, ou pela janela; o jeito se escolhe em /cme/etiqueta. */
 function imprimirPacotes(pacotes: PacoteCme[]) {
-  if (pacotes.length === 0) {
-    toast.error('Nenhum pacote para imprimir.')
-    return
-  }
-  try {
-    imprimirHtml(folhaDeEtiquetas(pacotes, lerConfigEtiqueta()))
-  } catch (e) {
-    toast.error(e instanceof Error ? e.message : 'Falha ao imprimir')
-  }
+  void imprimirEtiquetasCme(pacotes)
 }
 
 /** Colaborador escolhido numa lista (o login é compartilhado: quem preparou é escolhido). */
@@ -507,7 +499,6 @@ function AbaCadastro({
 }) {
   const [editando, setEditando] = useState<{ id?: string; nome: string; embalagem: string; validade: string } | null>(null)
   const [novoColab, setNovoColab] = useState('')
-  const [tamanho, setTamanho] = useState<ConfigEtiqueta>(lerConfigEtiqueta)
 
   const salvarMat = async () => {
     if (!editando) return
@@ -538,31 +529,6 @@ function AbaCadastro({
       onMudou()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao salvar')
-    }
-  }
-
-  const testarEtiqueta = () => {
-    guardarConfigEtiqueta(tamanho)
-    try {
-      imprimirHtml(
-        folhaDeEtiquetas(
-          [
-            {
-              codigo: '2900000000018',
-              materialNome: 'ETIQUETA DE TESTE',
-              lote: 'AC1-0000',
-              autoclave: autoclaves[0]?.nome ?? 'Autoclave 1',
-              metodo: autoclaves[0]?.metodo ?? 'Vapor saturado sob pressão',
-              esterilizadoEm: new Date().toISOString(),
-              validade: new Date().toLocaleDateString('sv-SE'),
-              responsavel: colaboradores[0]?.nome ?? 'Nome do colaborador',
-            },
-          ],
-          tamanho,
-        ),
-      )
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Falha ao imprimir')
     }
   }
 
@@ -657,46 +623,15 @@ function AbaCadastro({
         ) : null}
       </section>
 
-      <section className="space-y-2">
+      <section className="space-y-1">
         <h2 className="text-base font-semibold">Etiqueta</h2>
         <p className="text-sm text-muted-foreground">
-          Tamanho do rolo da Zebra, em milímetros, e o tipo de código. Imprima uma de teste para conferir antes de usar. Fica guardado neste computador.
+          Tamanho do rolo, Zebra e etiquetas de teste ficam em{' '}
+          <Link to="/cme/etiqueta" className="font-medium text-foreground underline">
+            Etiqueta e impressora
+          </Link>
+          .
         </p>
-        <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Tipo de código">
-          {(
-            [
-              ['qr', 'QR code (como a etiqueta antiga)'],
-              ['barras', 'Código de barras'],
-            ] as const
-          ).map(([f, rotulo]) => (
-            <Button
-              key={f}
-              type="button"
-              size="sm"
-              variant={tamanho.codigo === f ? 'default' : 'outline'}
-              aria-pressed={tamanho.codigo === f}
-              onClick={() => setTamanho({ ...tamanho, codigo: f })}
-            >
-              {rotulo}
-            </Button>
-          ))}
-        </div>
-        <p className="text-xs text-muted-foreground">
-          QR só é lido por leitor 2D (o que lê código no celular). Se o leitor da montagem não ler o QR, use código de barras.
-        </p>
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="et-l">Largura (mm)</Label>
-            <Input id="et-l" inputMode="numeric" value={tamanho.larguraMm} onChange={(e) => setTamanho({ ...tamanho, larguraMm: Number(e.target.value.replace(/\D/g, '')) || 0 })} className="h-10 w-24" />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="et-a">Altura (mm)</Label>
-            <Input id="et-a" inputMode="numeric" value={tamanho.alturaMm} onChange={(e) => setTamanho({ ...tamanho, alturaMm: Number(e.target.value.replace(/\D/g, '')) || 0 })} className="h-10 w-24" />
-          </div>
-          <Button variant="outline" className="h-10" onClick={testarEtiqueta}>
-            <Printer className="size-4" aria-hidden /> Imprimir etiqueta de teste
-          </Button>
-        </div>
       </section>
 
       <section className="space-y-1">
@@ -799,7 +734,7 @@ export function CmePacotesPage() {
 export function CmeCadastroPage() {
   const d = useDadosDaCme()
   return (
-    <AppLayout title="Cadastro da CME" subtitle="Materiais que passam pela autoclave, colaboradores e o tamanho da etiqueta.">
+    <AppLayout title="Cadastro da CME" subtitle="Materiais que passam pela autoclave e colaboradores.">
       <div className="mx-auto w-full max-w-3xl space-y-4">
         <Erro erro={d.erro} />
         <AbaCadastro materiais={d.materiais} colaboradores={d.colaboradores} autoclaves={d.autoclaves} onMudou={() => void d.carregar()} />
