@@ -979,9 +979,8 @@ export function salesByDoctor(sales: ClinicSale[]) {
       const e = touch(vendedor)
       e.vendeu += 1
       e.valorCents += s.valueCents
-      // fechou depois da consulta = veio de follow-up, não do impulso da sala
-      const dias = diasAteFechar(s)
-      if (dias != null && dias > 0) e.followUp += 1
+      // consultou num mês e fechou em outro = veio de follow-up, não do impulso da sala
+      if (fechouEmFollowUp(s)) e.followUp += 1
     }
     if (s.performingDoctor) touch(s.performingDoctor).executa += 1
   }
@@ -1096,38 +1095,53 @@ export function diasAteFechar(sale: ClinicSale): number | null {
   return Math.round((venda - consulta) / 86_400_000)
 }
 
+/**
+ * Fechou em follow-up = consultou num mês e fechou em OUTRO.
+ *
+ * Regra da Aline (25/09/2026): quem consultou em 21/09 e fechou em 24/09 fechou no
+ * mesmo mês, e essa venda entra no total do mês, não no follow-up. Até então
+ * qualquer venda um dia depois da consulta contava, e setembro mostrava 9
+ * follow-ups onde havia 4. É a mesma régua do card de conversão da consulta, que
+ * separa "Das consultas do mês" de "Fechado no mês (com follow-up)".
+ */
+export function fechouEmFollowUp(sale: ClinicSale): boolean {
+  const dias = diasAteFechar(sale)
+  if (dias == null || dias <= 0) return false
+  return String(sale.consultationAt).slice(0, 7) !== sale.soldAt.slice(0, 7)
+}
+
 export type FollowUpStats = {
   total: number
-  /** Fechou na própria consulta. */
-  noDia: number
-  /** Fechou depois, com trabalho de follow-up no meio. */
+  /** Consultou e fechou no mesmo mês, inclusive na própria consulta. */
+  noMes: number
+  /** Consultou num mês e fechou em outro: é o trabalho de follow-up. */
   followUp: number
   semConsulta: number
   /** Consulta registrada DEPOIS da venda: ou é pré-operatório, ou é data errada. */
   consultaDepois: number
   /** Mediana, não média: existe venda fechada 1004 dias depois da consulta, e uma só dessas desloca a média inteira. */
   medianaDias: number
-  valorNoDiaCents: number
+  valorNoMesCents: number
   valorFollowUpCents: number
 }
 
 /**
- * O quanto o follow-up vende, separado do que fecha na hora.
+ * O quanto o follow-up vende, separado do que fecha no mês da consulta.
  *
  * Sem isso a Central de Vendas só mostrava faturamento do mês, e o trabalho de
- * quem persegue o paciente que saiu da consulta sem fechar ficava invisível — na
- * base de hoje são 69 das 213 cirurgias, com mediana bem longe da média.
+ * quem persegue o paciente que saiu da consulta sem fechar ficava invisível.
+ * Follow-up é o que atravessou a virada do mês (ver fechouEmFollowUp).
  */
 export function followUpStats(sales: ClinicSale[]): FollowUpStats {
   const validas = sales.filter((s) => s.status !== 'cancelada')
   const stats: FollowUpStats = {
     total: validas.length,
-    noDia: 0,
+    noMes: 0,
     followUp: 0,
     semConsulta: 0,
     consultaDepois: 0,
     medianaDias: 0,
-    valorNoDiaCents: 0,
+    valorNoMesCents: 0,
     valorFollowUpCents: 0,
   }
   const prazos: number[] = []
@@ -1137,13 +1151,13 @@ export function followUpStats(sales: ClinicSale[]): FollowUpStats {
       stats.semConsulta += 1
     } else if (dias < 0) {
       stats.consultaDepois += 1
-    } else if (dias === 0) {
-      stats.noDia += 1
-      stats.valorNoDiaCents += s.valueCents
-    } else {
+    } else if (fechouEmFollowUp(s)) {
       stats.followUp += 1
       stats.valorFollowUpCents += s.valueCents
       prazos.push(dias)
+    } else {
+      stats.noMes += 1
+      stats.valorNoMesCents += s.valueCents
     }
   }
   if (prazos.length > 0) {

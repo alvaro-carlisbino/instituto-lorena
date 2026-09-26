@@ -5,6 +5,7 @@ import {
   type FiltroVendas,
   classificarProcedimento,
   diasAteFechar,
+  fechouEmFollowUp,
   filtrarVendas,
   followUpStats,
   progressoDaMeta,
@@ -109,6 +110,26 @@ describe('diasAteFechar', () => {
   })
 })
 
+describe('fechouEmFollowUp', () => {
+  it('consulta e venda no mesmo mês não é follow-up, mesmo dias depois (caso da Aline)', () => {
+    expect(fechouEmFollowUp(venda({ consultationAt: '2026-09-21', soldAt: '2026-09-24' }))).toBe(false)
+  })
+
+  it('consulta num mês e venda no outro é follow-up, mesmo com um dia de diferença', () => {
+    expect(fechouEmFollowUp(venda({ consultationAt: '2026-08-31', soldAt: '2026-09-01' }))).toBe(true)
+  })
+
+  it('mesmo mês de ANOS diferentes é follow-up', () => {
+    expect(fechouEmFollowUp(venda({ consultationAt: '2025-09-10', soldAt: '2026-09-10' }))).toBe(true)
+  })
+
+  it('fechou na consulta, sem consulta ou com consulta depois da venda não é follow-up', () => {
+    expect(fechouEmFollowUp(venda({ consultationAt: '2026-08-05', soldAt: '2026-08-05' }))).toBe(false)
+    expect(fechouEmFollowUp(venda({ consultationAt: null }))).toBe(false)
+    expect(fechouEmFollowUp(venda({ consultationAt: '2026-09-10', soldAt: '2026-08-05' }))).toBe(false)
+  })
+})
+
 describe('followUpStats', () => {
   const base = [
     venda({ id: 'a', consultationAt: '2026-08-05', soldAt: '2026-08-05', valueCents: 100 }),
@@ -118,27 +139,35 @@ describe('followUpStats', () => {
     venda({ id: 'e', consultationAt: '2026-09-01', soldAt: '2026-08-05' }),
   ]
 
-  it('separa o que fechou na consulta do que veio de follow-up', () => {
+  it('separa o que fechou no mês da consulta do que veio de follow-up', () => {
     const s = followUpStats(base)
-    expect(s.noDia).toBe(1)
-    expect(s.followUp).toBe(2)
+    expect(s.noMes).toBe(2)
+    expect(s.followUp).toBe(1)
     expect(s.semConsulta).toBe(1)
     expect(s.consultaDepois).toBe(1)
   })
 
   it('soma o faturamento de cada lado separadamente', () => {
     const s = followUpStats(base)
-    expect(s.valorNoDiaCents).toBe(100)
-    expect(s.valorFollowUpCents).toBe(600)
+    expect(s.valorNoMesCents).toBe(500)
+    expect(s.valorFollowUpCents).toBe(200)
   })
 
   it('usa mediana, não média — uma venda de 1004 dias não pode mover o número', () => {
     const s = followUpStats([
-      venda({ id: '1', consultationAt: '2026-08-01', soldAt: '2026-08-06' }), // 5
-      venda({ id: '2', consultationAt: '2026-08-01', soldAt: '2026-08-11' }), // 10
+      venda({ id: '1', consultationAt: '2026-07-27', soldAt: '2026-08-01' }), // 5
+      venda({ id: '2', consultationAt: '2026-07-22', soldAt: '2026-08-01' }), // 10
       venda({ id: '3', consultationAt: '2023-11-01', soldAt: '2026-08-01' }), // 1004
     ])
     expect(s.medianaDias).toBe(10)
+  })
+
+  it('a mediana só olha o follow-up: venda no mesmo mês não puxa o prazo para baixo', () => {
+    const s = followUpStats([
+      venda({ id: '1', consultationAt: '2026-08-01', soldAt: '2026-08-03' }), // mesmo mês
+      venda({ id: '2', consultationAt: '2026-07-02', soldAt: '2026-08-01' }), // 30
+    ])
+    expect(s.medianaDias).toBe(30)
   })
 
   it('venda cancelada não entra em nenhuma conta', () => {

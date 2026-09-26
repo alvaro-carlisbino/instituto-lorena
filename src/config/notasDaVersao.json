@@ -1,5 +1,15 @@
 [
   {
+    "id": "2026-09-26-follow-up-e-adicionar-paciente",
+    "data": "2026-09-26",
+    "titulo": "Follow-up conta só consulta de outro mês, e a aba Cirurgias ganhou Adicionar paciente",
+    "itens": [
+      "Central de Vendas: o card Fechou em follow-up agora conta só quem consultou num mês e fechou em outro. Quem consultou em 21/09 e fechou em 24/09 entra no total do mês, não no follow-up. A linha da venda mostra fechou no mês e quantos dias levou.",
+      "Cirurgias: botão Adicionar paciente, ao lado da busca. Escolha o dia, procure pelo nome e marque a data de quem já fechou e estava sem data (essas vendas não apareciam na lista nem na busca).",
+      "Se o paciente não tiver venda nenhuma, clique em Registrar venda nova: o formulário abre com o nome e o dia já preenchidos, e aceita paciente que ainda não tem cadastro no CRM."
+    ]
+  },
+  {
     "id": "2026-09-25-boleto-de-outro-cartao",
     "data": "2026-09-25",
     "titulo": "Boleto de cartão que não é o da clínica agora entra em Gastos e no DRE",

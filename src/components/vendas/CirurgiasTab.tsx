@@ -1,7 +1,16 @@
 import { useDeferredValue, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
-import { AlertTriangle, Ban, CalendarCheck2, CalendarPlus, CalendarSync, CircleCheck, Copy } from 'lucide-react'
+import {
+  AlertTriangle,
+  Ban,
+  CalendarCheck2,
+  CalendarPlus,
+  CalendarSync,
+  CircleCheck,
+  Copy,
+  UserPlus,
+} from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -29,6 +38,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { CalendarioVagas } from '@/components/vendas/CalendarioVagas'
+import { VendaFormDialog } from '@/components/vendas/VendaFormDialog'
 import { combinaBusca } from '@/lib/busca'
 import { useOpcoesComAtual } from '@/hooks/useOpcoes'
 import { mesAtual } from '@/lib/periodo'
@@ -38,12 +48,14 @@ import {
   type ClinicSale,
   type ConfirmationStatus,
   type ResultadoEnfermagem,
+  type StaffMember,
   type SurgeryReminder,
   cancelarCirurgia,
   getAgendaIcsUrl,
   googleCalendarLink,
   listClinicSales,
   listReminders,
+  listSurgicalStaff,
   remarcarCirurgia,
   setSaleConfirmation,
 } from '@/services/clinicSales'
@@ -64,6 +76,9 @@ const nomeDoMes = (m: string) => {
   })
   return nome.charAt(0).toUpperCase() + nome.slice(1)
 }
+
+/** 'YYYY-MM-DD' (coluna date) em dd/mm/aaaa, sem passar por fuso. */
+const diaBr = (d: string) => d.slice(0, 10).split('-').reverse().join('/')
 
 const ORDEM: ConfirmationStatus[] = ['confirmada', 'nao_confirmada', 'remanejar']
 
@@ -106,6 +121,11 @@ const recadoDaEnfermagem = (r: ResultadoEnfermagem): string =>
  */
 export function CirurgiasTab() {
   const [sales, setSales] = useState<ClinicSale[]>([])
+  /** Todas as vendas de cirurgia, inclusive sem data: é onde o "Adicionar paciente" procura. */
+  const [todas, setTodas] = useState<ClinicSale[]>([])
+  const [adicionando, setAdicionando] = useState(false)
+  const [staff, setStaff] = useState<StaffMember[]>([])
+  const [novaVenda, setNovaVenda] = useState<{ nome: string; dataProcedimento: string } | null>(null)
   const [reminders, setReminders] = useState<Map<string, SurgeryReminder[]>>(new Map())
   const [loading, setLoading] = useState(false)
   const [icsUrl, setIcsUrl] = useState<string | null>(null)
@@ -129,10 +149,11 @@ export function CirurgiasTab() {
   const load = async () => {
     setLoading(true)
     try {
-      const todas = await listClinicSales('cirurgia')
-      const agendadas = todas
+      const cirurgias = await listClinicSales('cirurgia')
+      const agendadas = cirurgias
         .filter((s) => s.scheduledAt && s.status !== 'cancelada' && s.status !== 'realizada')
         .sort((a, b) => String(a.scheduledAt).localeCompare(String(b.scheduledAt)))
+      setTodas(cirurgias)
       setSales(agendadas)
       setReminders(await listReminders(agendadas.map((s) => s.id)))
       setIcsUrl(await getAgendaIcsUrl().catch(() => null))
@@ -264,6 +285,18 @@ export function CirurgiasTab() {
     }
   }
 
+  const abrirNovaVenda = (sugestao: { nome: string; dataProcedimento: string }) => {
+    setAdicionando(false)
+    setNovaVenda(sugestao)
+    // Médicos vêm do espelho da sala e chegam com o formulário já aberto: esperar
+    // por eles deixava o clique sem resposta por uns segundos.
+    if (staff.length === 0) {
+      void listSurgicalStaff()
+        .then(setStaff)
+        .catch(() => undefined)
+    }
+  }
+
   // Só o primeiro carregamento esconde a tela. Fila vazia não esconde o
   // calendário de vagas: é justamente sem cirurgia marcada que ele mais importa.
   if (loading && sales.length === 0) {
@@ -318,7 +351,10 @@ export function CirurgiasTab() {
       <Card>
         <CardHeader className="gap-3">
           <CardTitle>Pacientes de {nomeDoMes(mesAtivo)}</CardTitle>
-          <CardAction>
+          <CardAction className="flex flex-wrap justify-end gap-2">
+            <Button size="sm" onClick={() => setAdicionando(true)}>
+              <UserPlus className="size-3.5" aria-hidden /> Adicionar paciente
+            </Button>
             {icsUrl && (
               <Button
                 size="sm"
@@ -552,6 +588,40 @@ export function CirurgiasTab() {
         </CardContent>
       </Card>
 
+      {/* Montado só enquanto aberto: cada abertura começa com busca e dia em branco. */}
+      {adicionando && (
+        <AdicionarPacienteDialog
+          mes={mesAtivo}
+          vendas={todas}
+          onClose={() => setAdicionando(false)}
+          onVerNaLista={(m, nome) => {
+            setAdicionando(false)
+            setFoco(null)
+            setMes(m)
+            setTermo(nome)
+          }}
+          onMarcado={async (m) => {
+            setAdicionando(false)
+            setMes(m)
+            await load()
+          }}
+          onNovaVenda={abrirNovaVenda}
+        />
+      )}
+
+      <VendaFormDialog
+        open={novaVenda != null}
+        kind="cirurgia"
+        staff={staff}
+        editing={null}
+        sugestao={novaVenda}
+        onClose={() => setNovaVenda(null)}
+        onSaved={() => {
+          if (novaVenda?.dataProcedimento) setMes(novaVenda.dataProcedimento.slice(0, 7))
+          void load()
+        }}
+      />
+
       <Dialog open={remarcando != null} onOpenChange={(v) => (!v ? setRemarcando(null) : null)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -644,5 +714,201 @@ export function CirurgiasTab() {
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+/**
+ * "Adicionar paciente" da fila de cirurgias (pedido da Aline, 25/09/2026).
+ *
+ * A fila só mostra venda de cirurgia COM data, então quem fechou e ficou sem data
+ * não aparece aqui nem na busca daqui: some entre a aba de vendas e esta. Por
+ * isso o botão procura primeiro nas vendas que já existem (marcar o dia de uma
+ * delas é o caso comum) e só depois oferece registrar venda nova. Abrir direto o
+ * formulário criaria a mesma cirurgia duas vezes, e o faturamento do mês junto.
+ */
+function AdicionarPacienteDialog({
+  mes,
+  vendas,
+  onClose,
+  onVerNaLista,
+  onMarcado,
+  onNovaVenda,
+}: {
+  /** 'YYYY-MM' que está em tela. */
+  mes: string
+  vendas: ClinicSale[]
+  onClose: () => void
+  onVerNaLista: (mes: string, nome: string) => void
+  onMarcado: (mes: string) => void | Promise<void>
+  onNovaVenda: (sugestao: { nome: string; dataProcedimento: string }) => void
+}) {
+  const [termo, setTermo] = useState('')
+  const [dia, setDia] = useState('')
+  const [hora, setHora] = useState('07:00')
+  const [marcando, setMarcando] = useState<string | null>(null)
+
+  // Cancelada e realizada ficam de fora: uma não vai acontecer, a outra já aconteceu.
+  const ativas = useMemo(
+    () => vendas.filter((s) => s.status !== 'cancelada' && s.status !== 'realizada'),
+    [vendas],
+  )
+  const semData = useMemo(
+    () => ativas.filter((s) => !s.scheduledAt).sort((a, b) => b.soldAt.localeCompare(a.soldAt)),
+    [ativas],
+  )
+  const buscando = termo.trim().length >= 2
+  const achadas = useMemo(
+    () =>
+      buscando
+        ? ativas
+            .filter((s) =>
+              combinaBusca(
+                termo,
+                s.patientName,
+                s.phone,
+                s.city,
+                s.procedureLabel,
+                s.attendingDoctor,
+                s.performingDoctor,
+              ),
+            )
+            .slice(0, 20)
+        : semData,
+    [ativas, semData, termo, buscando],
+  )
+
+  const marcar = async (s: ClinicSale) => {
+    if (!dia) return
+    if (dia < s.soldAt.slice(0, 10)) {
+      toast.error(`O dia da cirurgia está antes da venda (${diaBr(s.soldAt)}). Confira o ano.`)
+      return
+    }
+    setMarcando(s.id)
+    try {
+      const iso = new Date(`${dia}T${hora || '07:00'}:00`).toISOString()
+      const enfermagem = await remarcarCirurgia(s.id, iso)
+      toast.success(
+        `${s.patientName} marcada para ${diaBr(dia)}. ${recadoDaEnfermagem(enfermagem)}`,
+        enfermagem.precisaAvisar ? { duration: 15000 } : undefined,
+      )
+      await onMarcado(dia.slice(0, 7))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao marcar a data')
+    } finally {
+      setMarcando(null)
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(v) => (!v ? onClose() : null)}>
+      <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Adicionar paciente à fila de cirurgias</DialogTitle>
+          <DialogDescription>
+            Quem já fechou e ficou sem data só precisa do dia: escolha o dia e procure o paciente. Se ele
+            não tiver venda nenhuma, registre a venda no fim da lista, com ou sem cadastro no CRM.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="add-dia">Dia da cirurgia</Label>
+            <Input
+              id="add-dia"
+              type="date"
+              value={dia}
+              onChange={(e) => setDia(e.target.value)}
+              className="w-44"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="add-hora">Hora</Label>
+            <Input
+              id="add-hora"
+              type="time"
+              value={hora}
+              onChange={(e) => setHora(e.target.value)}
+              className="w-32"
+            />
+          </div>
+        </div>
+
+        <SearchField
+          value={termo}
+          onChange={setTermo}
+          label="Buscar venda de cirurgia"
+          placeholder="Nome, telefone, cidade, médico…"
+          resultados={buscando ? achadas.length : undefined}
+          autoFocus
+        />
+
+        <div className="space-y-1">
+          <p className="text-xs font-medium text-muted-foreground">
+            {buscando
+              ? achadas.length === 0
+                ? `Nenhuma venda de cirurgia com "${termo.trim()}".`
+                : 'Vendas de cirurgia encontradas'
+              : semData.length === 0
+                ? 'Nenhuma venda de cirurgia está sem data.'
+                : `Vendidas sem data (${semData.length})`}
+          </p>
+          {achadas.length > 0 && (
+            <ul className="divide-y rounded-lg border">
+              {achadas.map((s) => {
+                const mesDela = s.scheduledAt ? String(s.scheduledAt).slice(0, 7) : null
+                return (
+                  <li key={s.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">
+                        {s.patientName}
+                        {s.city && <span className="font-normal text-muted-foreground"> · {s.city}</span>}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        vendida em {diaBr(s.soldAt)} · {s.procedureLabel}
+                        {s.performingDoctor ?? s.attendingDoctor
+                          ? ` · ${s.performingDoctor ?? s.attendingDoctor}`
+                          : ''}
+                      </p>
+                      {s.scheduledAt ? (
+                        <p className="text-xs text-emerald-700 dark:text-emerald-400">
+                          {mesDela === mes ? 'já está na lista, ' : ''}marcada para{' '}
+                          {new Date(s.scheduledAt).toLocaleDateString('pt-BR')}
+                        </p>
+                      ) : (
+                        <p className="text-xs text-amber-700 dark:text-amber-400">sem data de cirurgia</p>
+                      )}
+                    </div>
+                    {s.scheduledAt && mesDela ? (
+                      <Button size="sm" variant="outline" onClick={() => onVerNaLista(mesDela, s.patientName)}>
+                        {mesDela === mes ? 'Mostrar' : `Ver em ${nomeDoMes(mesDela)}`}
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        disabled={!dia || marcando != null}
+                        title={dia ? undefined : 'Escolha o dia da cirurgia lá em cima'}
+                        onClick={() => void marcar(s)}
+                      >
+                        {marcando === s.id ? 'Marcando…' : dia ? `Marcar para ${diaBr(dia)}` : 'Escolha o dia'}
+                      </Button>
+                    )}
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </div>
+
+        <DialogFooter className="items-center sm:justify-between">
+          <p className="text-xs text-muted-foreground">Não achou? A cirurgia ainda não foi registrada como venda.</p>
+          <Button
+            variant="outline"
+            onClick={() => onNovaVenda({ nome: termo.trim(), dataProcedimento: dia })}
+          >
+            <UserPlus className="size-3.5" aria-hidden /> Registrar venda nova
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

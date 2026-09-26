@@ -84,6 +84,12 @@ type Props = {
    * ainda pode estar no funil da triagem, que não diz o que ele comprou.
    */
   onKindChange?: (kind: ClinicSaleKind) => void
+  /**
+   * Nome digitado e dia escolhido por quem abriu, para paciente que ainda não é
+   * cadastro. É o "Adicionar paciente" da aba Cirurgias: ela já procurou pelo nome
+   * e já sabe o dia, e digitar os dois de novo aqui é o retrabalho da planilha.
+   */
+  sugestao?: { nome: string; dataProcedimento: string } | null
   onClose: () => void
   onSaved: () => void
 }
@@ -96,7 +102,17 @@ type Props = {
  * lista), e a checagem de data do procedimento anterior à venda, que produziu
  * pelo menos uma cirurgia registrada três meses no passado.
  */
-export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindChange, onClose, onSaved }: Props) {
+export function VendaFormDialog({
+  open,
+  kind,
+  staff,
+  editing,
+  prefill,
+  onKindChange,
+  sugestao,
+  onClose,
+  onSaved,
+}: Props) {
   const cirurgia = kind === 'cirurgia'
   const medicos = useMemo(() => staff.filter((s) => s.tipo === 'MEDICO'), [staff])
   // A anestesia não sai do espelho da sala: ela tem empresa (Grupo Ingá, Loviderm),
@@ -210,7 +226,7 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
       return
     }
     setPicked(prefill ? { id: prefill.leadId, name: prefill.patientName, phone: prefill.phone ?? '' } : null)
-    setNomeLivre('')
+    setNomeLivre(prefill ? '' : (sugestao?.nome ?? ''))
     setCidade('')
     setOrigem('')
     setOrigemOutro('')
@@ -239,7 +255,7 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
     setPagamento('')
     setParcelas('')
     setNf(false)
-    setDataProc('')
+    setDataProc(sugestao?.dataProcedimento ?? '')
     setHoraProc('07:00')
     setADefinir(false)
     setHotel(false)
@@ -468,6 +484,7 @@ export function VendaFormDialog({ open, kind, staff, editing, prefill, onKindCha
           <div className="space-y-1.5">
             <Label>Paciente</Label>
             <PatientSearchField
+              value={sugestao?.nome}
               picked={picked}
               onPick={(p) => setPicked(p)}
               onClear={() => setPicked(null)}

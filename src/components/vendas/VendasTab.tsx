@@ -68,6 +68,7 @@ import {
   diasAteFechar,
   dispensarPendencia,
   filtrarVendas,
+  fechouEmFollowUp,
   followUpStats,
   listClinicSales,
   listSalesTargets,
@@ -121,13 +122,20 @@ const STATUS_LABEL: Record<ClinicSale['status'], string> = {
   cancelada: 'Cancelada',
 }
 
-/** Quanto tempo a venda levou depois da consulta, em rótulo curto de tabela. */
-function rotuloPrazo(dias: number | null): { texto: string; tom: string } {
+/**
+ * Quanto tempo a venda levou depois da consulta, em rótulo curto de tabela.
+ *
+ * "follow-up" só aparece quando a consulta foi em outro mês, a mesma régua do card
+ * do topo: a linha dizendo follow-up e o card não contando era o que confundia.
+ */
+function rotuloPrazo(s: ClinicSale): { texto: string; tom: string } {
+  const dias = diasAteFechar(s)
   if (dias == null) return { texto: 'sem consulta', tom: 'text-muted-foreground' }
   if (dias < 0) return { texto: 'consulta depois', tom: 'text-amber-600' }
   if (dias === 0) return { texto: 'fechou na consulta', tom: 'text-emerald-600' }
-  if (dias === 1) return { texto: 'follow-up · 1 dia', tom: 'text-sky-600' }
-  return { texto: `follow-up · ${dias} dias`, tom: 'text-sky-600' }
+  const prazo = dias === 1 ? '1 dia' : `${dias} dias`
+  if (!fechouEmFollowUp(s)) return { texto: `fechou no mês · ${prazo}`, tom: 'text-emerald-600' }
+  return { texto: `follow-up · ${prazo}`, tom: 'text-sky-600' }
 }
 
 /** Entrada ou contrato que ainda falta: aviso, não erro como a nota fiscal. */
@@ -401,10 +409,10 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
   )
   const resultado = useMemo(() => resultadoDasVendas(doMes, kitsPorVenda), [doMes, kitsPorVenda])
 
-  // Quanto do mês fechou na própria consulta e quanto veio de follow-up.
+  // Quanto do mês fechou no mês da consulta e quanto veio de follow-up (consulta de outro mês).
   const prazo = useMemo(() => followUpStats(doMes), [doMes])
   const pctFollowUp = useMemo(() => {
-    const base = prazo.noDia + prazo.followUp
+    const base = prazo.noMes + prazo.followUp
     return base > 0 ? Math.round((prazo.followUp / base) * 100) : 0
   }, [prazo])
 
@@ -669,7 +677,7 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
           <Kpi
             rotulo="Fechou em follow-up"
             valor={prazo.followUp}
-            detalhe={`de ${prazo.noDia + prazo.followUp} · ${pctFollowUp}% · ${brl(prazo.valorFollowUpCents)}${
+            detalhe={`consulta de outro mês · de ${prazo.noMes + prazo.followUp} · ${pctFollowUp}% · ${brl(prazo.valorFollowUpCents)}${
               prazo.medianaDias > 0 ? ` · mediana ${prazo.medianaDias} dias` : ''
             }`}
           />
@@ -928,7 +936,7 @@ export function VendasTab({ kind }: { kind: ClinicSaleKind }) {
                 </TableHeader>
                 <TableBody>
                   {doMes.map((s) => {
-                    const prazoVenda = rotuloPrazo(diasAteFechar(s))
+                    const prazoVenda = rotuloPrazo(s)
                     return (
                     <TableRow key={s.id} className={s.status === 'cancelada' ? 'opacity-60' : undefined}>
                       <TableCell className="hidden whitespace-nowrap lg:table-cell">
